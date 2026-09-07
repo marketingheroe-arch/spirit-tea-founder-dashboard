@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spirit Tea — Founder Dashboard</title>
+<style>
+/* ─────────────────────────── TOKENS ─────────────────────────── */
+:root{
+  color-scheme: light;
+  --brand-indigo:#2b4163;
+  --brand-lilac:#c99fc9;
+
+  --page:#F4F1EA;
+  --surface:#FBFAF7;
+  --surface-2:#F7F4ED;
+
+  --ink:#14171d;
+  --ink-2:#52514e;
+  --ink-muted:#8a8880;
+  --grid:#E3DFD6;
+  --axis:#C9C4B8;
+  --hairline:rgba(20,23,29,.10);
+
+  --s1:#4a72cf;   /* categorical 1 — indigo/blue */
+  --s2:#d96a2e;   /* categorical 2 — terracotta */
+  --s3:#0f9b7d;   /* categorical 3 — teal */
+  --s4:#c06ac0;   /* categorical 4 — lilac (labels mandatory) */
+
+  --ord-1:#9db4de; /* ordinal light  (T3) */
+  --ord-2:#5b7fc9; /* ordinal mid    (T2) */
+  --ord-3:#2b4163; /* ordinal dark   (T1) */
+
+  --good:#0ca30c;
+  --warning:#fab219;
+  --serious:#ec835a;
+  --critical:#d03b3b;
+  --up:#006300;
+
+  --r:10px;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+/* This dashboard deliberately ships in light only — every surface and colour
+   is painted explicitly above, so the viewer's OS theme never alters it. */
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--page);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.01em}
+a{color:var(--s1)}
+button{font-family:inherit;font-size:inherit;cursor:pointer}
+[hidden]{display:none!important}
+
+/* ─────────────────────────── AUTH ─────────────────────────── */
+#auth{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--page);z-index:100;padding:24px}
+.auth-card{background:var(--surface);border:1px solid var(--hairline);border-radius:16px;padding:36px 34px;max-width:400px;width:100%;box-shadow:0 20px 50px -20px rgba(43,65,99,.30)}
+.auth-mark{width:40px;height:40px;border-radius:50%;background:var(--brand-lilac);color:#fff;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:600;margin-bottom:20px;font-family:Georgia,serif}
+.auth-card h1{font-size:19px;margin-bottom:4px}
+.auth-card p{margin:0 0 22px;color:var(--ink-2);font-size:13px}
+.field{margin-bottom:13px}
+.field label{display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted);margin-bottom:5px}
+input[type=text],input[type=password],input[type=email],input[type=date],select{
+  width:100%;padding:9px 11px;border:1px solid var(--axis);border-radius:8px;background:var(--surface);
+  color:var(--ink);font-family:inherit;font-size:14px}
+input:focus,select:focus{outline:2px solid var(--s1);outline-offset:-1px;border-color:transparent}
+.btn{background:var(--brand-indigo);color:#fff;border:none;border-radius:8px;padding:10px 16px;font-weight:600;font-size:14px}
+.btn:hover{filter:brightness(1.12)}
+.btn-ghost{background:transparent;color:var(--ink-2);border:1px solid var(--axis)}
+.btn-ghost:hover{background:var(--surface-2);filter:none}
+.btn.full{width:100%;margin-top:8px}
+.auth-err{background:rgba(208,59,59,.10);color:var(--critical);border-radius:7px;padding:9px 11px;font-size:13px;margin-top:12px}
+
+/* ─────────────────────────── SHELL ─────────────────────────── */
+header{background:var(--brand-indigo);color:#fff;padding:16px 26px}
+.hwrap{max-width:1320px;margin:0 auto;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.hmark{width:30px;height:30px;border-radius:50%;background:var(--brand-lilac);display:flex;align-items:center;justify-content:center;font-family:Georgia,serif;font-weight:600;font-size:15px;flex:0 0 auto}
+.htitle{font-size:16px;font-weight:600}
+.hsub{font-size:12px;opacity:.72;margin-top:1px}
+.hspace{flex:1}
+.hbtn{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.20);border-radius:7px;padding:7px 12px;font-size:13px}
+.hbtn:hover{background:rgba(255,255,255,.22)}
+
+.controls{background:var(--surface);border-bottom:1px solid var(--hairline);padding:11px 26px}
+.cwrap{max-width:1320px;margin:0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.chip{background:transparent;border:1px solid var(--axis);color:var(--ink-2);border-radius:999px;padding:5px 13px;font-size:13px}
+.chip[aria-pressed="true"]{background:var(--brand-indigo);border-color:var(--brand-indigo);color:#fff;font-weight:600}
+.custom-range{display:flex;align-items:center;gap:6px;margin-left:auto;flex-wrap:wrap}
+.custom-range input[type=date]{width:auto;padding:5px 9px;font-size:13px}
+.custom-range span{color:var(--ink-muted);font-size:13px}
+
+nav.tabs{background:var(--surface);border-bottom:1px solid var(--hairline);padding:0 26px;position:sticky;top:0;z-index:20}
+.twrap{max-width:1320px;margin:0 auto;display:flex;gap:2px;overflow-x:auto}
+.tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--ink-2);padding:12px 15px;font-size:14px;white-space:nowrap}
+.tab[aria-selected="true"]{color:var(--brand-indigo);border-bottom-color:var(--brand-indigo);font-weight:600}
+
+main{max-width:1320px;margin:0 auto;padding:22px 26px 70px}
+section.panel{display:none}
+section.panel.active{display:block}
+
+/* ─────────────────────────── CARDS / TILES ─────────────────────────── */
+.card{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r);padding:18px 20px;margin-bottom:16px}
+.card > h2{font-size:14px;margin-bottom:2px}
+.card > .cap{font-size:12.5px;color:var(--ink-2);margin:0 0 16px}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:1000px){.g3,.g4{grid-template-columns:repeat(2,1fr)}.g2{grid-template-columns:1fr}}
+@media(max-width:620px){.g2,.g3,.g4{grid-template-columns:1fr}}
+
+.tile{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r);padding:15px 17px}
+.tile .lab{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted);display:flex;align-items:center;gap:5px}
+.tile .val{font-size:27px;font-weight:600;letter-spacing:-.02em;margin-top:7px;line-height:1.15}
+.tile .sub{font-size:12.5px;color:var(--ink-2);margin-top:3px}
+.hero{background:linear-gradient(135deg,var(--brand-indigo),#3d5a86);color:#fff;border:none}
+.hero .lab{color:rgba(255,255,255,.72)}
+.hero .val{font-size:40px;margin-top:9px}
+.hero .sub{color:rgba(255,255,255,.80)}
+
+/* info dot + tooltip */
+.info{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;
+  border:1px solid currentColor;font-size:9.5px;font-weight:700;opacity:.55;cursor:help;flex:0 0 auto;font-style:normal}
+.info:hover,.info:focus{opacity:1}
+#tip{position:fixed;z-index:200;max-width:290px;background:var(--brand-indigo);color:#fff;border-radius:8px;
+  padding:9px 11px;font-size:12.5px;line-height:1.45;box-shadow:0 10px 30px -8px rgba(0,0,0,.45);pointer-events:none;opacity:0;transition:opacity .12s}
+#tip.on{opacity:1}
+
+/* ─────────────────────────── TABLES ─────────────────────────── */
+.tblwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted);
+   padding:8px 10px;border-bottom:1px solid var(--axis);white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid var(--grid);vertical-align:middle}
+tbody tr:hover{background:var(--surface-2)}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.nm{font-weight:600}
+.dim{color:var(--ink-2)}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap}
+.pill.ent{background:rgba(74,114,207,.14);color:var(--s1)}
+.pill.sales{background:rgba(15,155,125,.14);color:var(--s3)}
+.pill.cs{background:rgba(217,106,46,.14);color:var(--s2)}
+.pill.none{background:var(--surface-2);color:var(--ink-muted)}
+.swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:baseline}
+
+/* legend */
+.legend{display:flex;gap:15px;flex-wrap:wrap;margin:0 0 12px;font-size:12.5px;color:var(--ink-2)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+
+/* notice */
+.note{border-left:3px solid var(--warning);background:var(--surface-2);border-radius:0 8px 8px 0;padding:11px 14px;font-size:13px;color:var(--ink-2);margin-bottom:16px}
+.note b{color:var(--ink)}
+.note.note-info{border-left-color:var(--s1)}
+
+/* loading */
+#load{position:fixed;inset:0;background:var(--page);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:90;gap:14px}
+.spin{width:34px;height:34px;border:3px solid var(--grid);border-top-color:var(--brand-indigo);border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+#load .msg{color:var(--ink-2);font-size:13px}
+.bar{width:230px;height:4px;background:var(--grid);border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--brand-indigo);width:0;transition:width .3s}
+.inline-load{color:var(--ink-muted);font-size:13px;padding:22px 0;text-align:center}
+
+svg{display:block;overflow:visible}
+.empty{color:var(--ink-muted);font-size:13px;padding:18px 0;text-align:center}
+footer{max-width:1320px;margin:0 auto;padding:0 26px 40px;color:var(--ink-muted);font-size:12px}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════ AUTH ══════════════════ -->
+<div id="auth">
+  <div class="auth-card">
+    <div class="auth-mark">S</div>
+    <h1>Founder Dashboard</h1>
+    <p>Spirit Tea — wholesale performance</p>
+    <div class="field">
+      <label for="em">Email</label>
+      <input type="email" id="em" autocomplete="username" placeholder="you@spirittea.co">
+    </div>
+    <div class="field">
+      <label for="pw">Password</label>
+      <input type="password" id="pw" autocomplete="current-password">
+    </div>
+    <button class="btn full" id="go">Open dashboard</button>
+    <div class="auth-err" id="aerr" hidden></div>
+  </div>
+</div>
+
+<!-- ══════════════════ LOADING ══════════════════ -->
+<div id="load" hidden>
+  <div class="spin"></div>
+  <div class="msg" id="lmsg">Loading…</div>
+  <div class="bar"><i id="lbar"></i></div>
+</div>
+
+<!-- ══════════════════ APP ══════════════════ -->
+<div id="app" hidden>
+<header>
+  <div class="hwrap">
+    <div class="hmark">S</div>
+    <div>
+      <div class="htitle">Spirit Tea — Founder Dashboard</div>
+      <div class="hsub" id="rangelabel">—</div>
+    </div>
+    <div class="hspace"></div>
+    <button class="hbtn" id="refresh">↻ Refresh</button>
+    <button class="hbtn" id="out">Sign out</button>
+  </div>
+</header>
+
+<div class="controls">
+  <div class="cwrap">
+    <button class="chip" data-range="ytd" aria-pressed="true">2026 YTD</button>
+    <button class="chip" data-range="qtd" aria-pressed="false">This quarter</button>
+    <button class="chip" data-range="mtd" aria-pressed="false">This month</button>
+    <button class="chip" data-range="30" aria-pressed="false">Last 30 days</button>
+    <button class="chip" data-range="90" aria-pressed="false">Last 90 days</button>
+    <div class="custom-range">
+      <input type="date" id="d1"><span>to</span><input type="date" id="d2">
+      <button class="chip" id="apply">Apply</button>
+    </div>
+  </div>
+</div>
+
+<nav class="tabs"><div class="twrap">
+  <button class="tab" data-tab="ov"  aria-selected="true">Overview</button>
+  <button class="tab" data-tab="team" aria-selected="false">Team</button>
+  <button class="tab" data-tab="acct" aria-selected="false">Accounts</button>
+  <button class="tab" data-tab="prod" aria-selected="false">Products &amp; Matcha</button>
+  <button class="tab" data-tab="def"  aria-selected="false">How to read this</button>
+</div></nav>
+
+<main>
+  <section class="panel active" id="p-ov"></section>
+  <section class="panel" id="p-team"></section>
+  <section class="panel" id="p-acct"></section>
+  <section class="panel" id="p-prod"></section>
+  <section class="panel" id="p-def"></section>
+</main>
+
+<footer>
+  Source: HubSpot portal 22533061 — Orders object (0-123), Companies, Deals, Line items.
+  Wholesale (B2B) only. <span id="stamp"></span>
+</footer>
+</div>
+
+<div id="tip"></div>
+
+<script>
+"use strict";
+/* ══════════════════════════ CONFIG ══════════════════════════ */
+const PROXY      = 'https://super-limit-2f74.marketing-heroe.workers.dev';
+const PROXY_KEY  = 'spirit2253';            // Worker auth — separate from the UI password
+const PASSWORD   = 'Stjordan26?!';
+const ALLOWED    = ['jordan@spirittea.co','marketing.heroe@gmail.com'];
+const PORTAL     = '22533061';
+const HS_CO      = `https://app.hubspot.com/contacts/${PORTAL}/record/0-2/`;
+
+// Segment property: the label is "Enterprise" but the STORED value is "Distributor".
+const ENTERPRISE_VALUE = 'Distributor';
+const CHURN_DAYS = 365;      // no order in > 1 year  = churned
+const SLIP_DAYS  = 90;       // 90–365 days           = slipping
+
+const OWNERS = {
+  '80988946' :{name:'Will Frith',      role:'Sales'},
+  '312248717':{name:'Daniel Mendoza',  role:'Sales'},
+  '469220097':{name:'Marcos Iglesias', role:'Sales'},
+  '294190969':{name:'Jordan Scherer',  role:'Sales'},
+  '96226553' :{name:'Kathie Hilberg',  role:'Sales'},
+  '93327978' :{name:'Matthew Gasaway', role:'CS'},
+  '93327977' :{name:'Andres Polo',     role:'CS'},
+};
+const OTHER = '__other__';
+
+// Inbound / outbound split — Original Traffic Source Drill-Down 1 (companies).
+const INBOUND_TOKENS  = ['shopify','integration','spirittea.co'];
+const OUTBOUND_TOKENS = ['import','extension','crm_ui','presentations','mobile_ios','bcc_to_crm','sales'];
+
+// Matcha detection. Applied to the LINE ITEM's own SKU + name, so private-label
+// and archived matcha SKUs are caught, not just what is active in the storefront.
+const MATCHA_EXCLUDE = new Set(['chen_dark_matchawhisk_teaware','mrqing_ceramics_matchbowl_white',
+  'cafe-matcha_115mm_green','cafe-matcha_115mm_white','cafe-matcha_76mm_green','cafe-matcha_76mm_white',
+  'cafe-matcha_shaker_teawares','matcha_set_holder','matcha_set_scoop','matcha_set_sifter','matcha_starter_set']);
+const TEAWARE_WORDS = ['whisk','sifter','scoop','bowl','shaker','tin ','tins','teaware','holder','starter set','apparel','tote'];
+
+function isMatcha(sku,name){
+  const s=(sku||'').toLowerCase(), n=(name||'').toLowerCase();
+  if(MATCHA_EXCLUDE.has(s)) return false;
+  const hit = s.includes('_match') || s.includes('matcha') || n.includes('matcha');
+  if(!hit) return false;
+  if(TEAWARE_WORDS.some(w=>n.includes(w))) return false;
+  return true;
+}
+function tierOf(sku){ const m=(sku||'').toLowerCase().match(/tier\s*([1-4])/); return m?('T'+m[1]):null; }
+// Private-label matcha = customer-branded SKUs (hidden from the storefront)
+const PL_HINTS = ['verve','harmony leaf','alfred','gregory','once more','soft landing','cafe matcha','b5 '];
+function isPrivateLabel(name){ const n=(name||'').toLowerCase(); return PL_HINTS.some(h=>n.includes(h)); }
+
+/* ══════════════════════════ STATE ══════════════════════════ */
+let RANGE={from:null,to:null,key:'ytd'};
+let CORE=null, PRODUCTS=null;
+const CACHE={};             // rangeKey -> {core, products}
+
+/* ══════════════════════════ UTIL ══════════════════════════ */
+const $=s=>document.querySelector(s);
+const $$=s=>Array.from(document.querySelectorAll(s));
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtUSD=n=>'$'+Math.round(n||0).toLocaleString('en-US');
+const fmtUSDk=n=>{n=n||0; if(Math.abs(n)>=1e6)return '$'+(n/1e6).toFixed(2)+'M'; if(Math.abs(n)>=1e3)return '$'+Math.round(n/1e3)+'k'; return '$'+Math.round(n);};
+const fmtN=n=>Math.round(n||0).toLocaleString('en-US');
+const pct=(a,b)=>b>0?(a/b*100):0;
+const fmtPct=(v,d=1)=>(v||0).toFixed(d)+'%';
+const iso=d=>d.toISOString().slice(0,10);
+const dayDiff=(a,b)=>Math.round((a-b)/864e5);
+function median(a){ if(!a.length)return null; const s=[...a].sort((x,y)=>x-y),m=s.length>>1; return s.length%2?s[m]:(s[m-1]+s[m])/2; }
+function ownerKey(id){ return (id && OWNERS[id]) ? id : OTHER; }
+function ownerName(k){ return k===OTHER ? 'Unassigned / other' : OWNERS[k].name; }
+
+/* tooltips */
+const TIP=$('#tip');
+function tipOn(e){ const t=e.currentTarget.getAttribute('data-tip'); if(!t)return;
+  TIP.textContent=t; TIP.classList.add('on');
+  const r=e.currentTarget.getBoundingClientRect(); const w=Math.min(290,innerWidth-24);
+  TIP.style.width=w+'px';
+  let x=r.left+r.width/2-w/2; x=Math.max(12,Math.min(x,innerWidth-w-12));
+  let y=r.bottom+9; if(y+TIP.offsetHeight>innerHeight-12) y=r.top-TIP.offsetHeight-9;
+  TIP.style.left=x+'px'; TIP.style.top=y+'px';
+}
+function tipOff(){ TIP.classList.remove('on'); }
+function bindTips(root){
+  (root||document).querySelectorAll('[data-tip]').forEach(el=>{
+    el.addEventListener('mouseenter',tipOn); el.addEventListener('mouseleave',tipOff);
+    el.addEventListener('focus',tipOn); el.addEventListener('blur',tipOff);
+  });
+}
+const I=t=>`<i class="info" tabindex="0" data-tip="${esc(t)}">i</i>`;
+
+/* ══════════════════════════ API ══════════════════════════ */
+async function hsPost(path,body){
+  const r=await fetch(`${PROXY}?path=${encodeURIComponent(path)}`,{
+    method:'POST',headers:{'x-dashboard-key':PROXY_KEY,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok) throw new Error(`${path.split('?')[0]} → HTTP ${r.status}`);
+  return r.json();
+}
+async function pool(items,fn,size=12){
+  const out=new Array(items.length); let i=0;
+  await Promise.all(Array.from({length:Math.min(size,items.length)||1},async()=>{
+    for(;;){ const k=i++; if(k>=items.length)return; out[k]=await fn(items[k],k); }
+  }));
+  return out;
+}
+async function searchAll(obj,body,cap=20000){
+  let all=[],after;
+  for(;;){
+    const p={...body,limit:200}; if(after)p.after=after;
+    const r=await hsPost(`/crm/v3/objects/${obj}/search`,p);
+    all=all.concat(r.results||[]);
+    after=r.paging&&r.paging.next&&r.paging.next.after;
+    if(!after || !(r.results||[]).length || all.length>=cap) break;
+  }
+  return all;
+}
+/** v4 batch associations: from-object ids → to-object ids */
+async function assocBatch(fromObj,toObj,ids){
+  const map=new Map();
+  const chunks=[]; for(let i=0;i<ids.length;i+=100) chunks.push(ids.slice(i,i+100));
+  await pool(chunks,async ch=>{
+    const r=await hsPost(`/crm/v4/associations/${fromObj}/${toObj}/batch/read`,{inputs:ch.map(id=>({id:String(id)}))});
+    (r.results||[]).forEach(row=>{
+      const from=row.from&&row.from.id; if(!from)return;
+      map.set(String(from),(row.to||[]).map(t=>String(t.toObjectId)));
+    });
+  },10);
+  return map;
+}
+async function batchRead(obj,ids,props){
+  const out=[];
+  const chunks=[]; for(let i=0;i<ids.length;i+=100) chunks.push(ids.slice(i,i+100));
+  await pool(chunks,async ch=>{
+    const r=await hsPost(`/crm/v3/objects/${obj}/batch/read`,{inputs:ch.map(id=>({id:String(id)})),properties:props});
+    (r.results||[]).forEach(x=>out.push(x));
+  },10);
+  return out;
+}
+
+/* progress */
+let PSTEP=0,PMAX=1;
+function prog(msg,step,max){ if(max)PMAX=max; if(step!=null)PSTEP=step; $('#lmsg').textContent=msg; $('#lbar').style.width=Math.min(100,PSTEP/PMAX*100)+'%'; }
+
+/* ══════════════════════════ DATE RANGES ══════════════════════════ */
+function computeRange(key){
+  const now=new Date(); const y=now.getFullYear();
+  if(key==='ytd')  return {from:new Date(Date.UTC(2026,0,1)), to:now};
+  if(key==='qtd'){ const q=Math.floor(now.getMonth()/3)*3; return {from:new Date(Date.UTC(y,q,1)), to:now}; }
+  if(key==='mtd')  return {from:new Date(Date.UTC(y,now.getMonth(),1)), to:now};
+  if(key==='30')   return {from:new Date(now-30*864e5), to:now};
+  if(key==='90')   return {from:new Date(now-90*864e5), to:now};
+  return {from:new Date(Date.UTC(2026,0,1)), to:now};
+}
+/** month-sized windows — keeps every order search under HubSpot's 10k paging ceiling */
+function monthChunks(from,to){
+  const out=[]; let c=new Date(Date.UTC(from.getUTCFullYear(),from.getUTCMonth(),1));
+  const start=from.getTime(), end=to.getTime();
+  while(c.getTime()<=end){
+    const nxt=new Date(Date.UTC(c.getUTCFullYear(),c.getUTCMonth()+1,1));
+    out.push({gte:Math.max(c.getTime(),start), lt:Math.min(nxt.getTime(),end+1),
+              label:c.toLocaleDateString('en-US',{month:'short',timeZone:'UTC'})});
+    c=nxt;
+  }
+  return out;
+}
+
+/* ══════════════════════════ LOAD — CORE ══════════════════════════ */
+async function loadCore(){
+  const chunks=monthChunks(RANGE.from,RANGE.to);
+  prog('Loading accounts…',0,4+chunks.length);
+
+  // 1 · every company (needed for cohorts, churn and owner mapping — not just the range)
+  const companies=await searchAll('companies',{
+    filterGroups:[{filters:[{propertyName:'createdate',operator:'HAS_PROPERTY'}]}],
+    properties:['name','domain','hubspot_owner_id','segment','enterprise_type','lifecyclestage','createdate',
+      'average_order_value_rollup','last_order_date_rollup','first_order_date','hs_analytics_source_data_1',
+      'num_associated_deals','country'],
+    sorts:[{propertyName:'createdate',direction:'DESCENDING'}]},6000);
+  prog(`${fmtN(companies.length)} accounts. Loading deals…`,1);
+
+  // 2 · sales-pipeline deals
+  const deals=await searchAll('deals',{
+    filterGroups:[{filters:[{propertyName:'pipeline',operator:'EQ',value:'default'}]}],
+    properties:['dealname','dealstage','hubspot_owner_id','createdate','closedate','hs_is_closed','hs_is_closed_won'],
+    sorts:[{propertyName:'createdate',direction:'DESCENDING'}]},6000);
+  prog(`${fmtN(deals.length)} deals. Loading orders…`,2);
+
+  // 3 · orders, one search window per month
+  let orders=[];
+  for(let i=0;i<chunks.length;i++){
+    const c=chunks[i];
+    const part=await searchAll('0-123',{
+      filterGroups:[{filters:[
+        {propertyName:'hs_external_created_date',operator:'GTE',value:String(c.gte)},
+        {propertyName:'hs_external_created_date',operator:'LT', value:String(c.lt)}]}],
+      properties:['hs_total_price','hs_order_discount','hs_subtotal_price','hs_external_created_date','hs_order_name'],
+      sorts:[{propertyName:'hs_external_created_date',direction:'ASCENDING'}]},12000);
+    orders=orders.concat(part);
+    prog(`Loading orders… ${fmtN(orders.length)}`,3+i);
+  }
+  prog(`${fmtN(orders.length)} orders. Linking to accounts…`,3+chunks.length);
+
+  // 4 · order → company
+  const o2c=await assocBatch('0-123','companies',orders.map(o=>o.id));
+  return {companies,deals,orders,o2c};
+}
+
+/* ══════════════════════════ LOAD — PRODUCTS (lazy) ══════════════════════════ */
+async function loadProducts(){
+  const orders=CORE.orders;
+  prog('Linking line items…',0,3);
+  const o2l=await assocBatch('0-123','line_items',orders.map(o=>o.id));
+  const ids=[...new Set([].concat(...[...o2l.values()]))];
+  prog(`${fmtN(ids.length)} line items. Reading…`,1,3);
+  const items=await batchRead('line_items',ids,['hs_sku','name','quantity','price','amount','hs_product_id']);
+  prog('Allocating discounts…',2,3);
+  return {o2l,items:new Map(items.map(i=>[String(i.id),i.properties]))};
+}
+
+/* ══════════════════════════ COMPUTE ══════════════════════════ */
+function computeCore(){
+  const {companies,deals,orders,o2c}=CORE;
+  const from=RANGE.from.getTime(), to=RANGE.to.getTime(), now=Date.now();
+
+  const co=new Map();
+  companies.forEach(c=>{
+    const p=c.properties;
+    co.set(String(c.id),{
+      id:String(c.id), name:p.name||'(no name)', owner:ownerKey(p.hubspot_owner_id),
+      segment:p.segment||'', entType:p.enterprise_type||'', life:p.lifecyclestage||'',
+      created:p.createdate?Date.parse(p.createdate):null,
+      aov:parseFloat(p.average_order_value_rollup)||0,
+      lastOrder:p.last_order_date_rollup?Date.parse(p.last_order_date_rollup):null,
+      firstOrder:p.first_order_date?Date.parse(p.first_order_date):null,
+      src:(p.hs_analytics_source_data_1||'').toLowerCase(),
+      country:p.country||''
+    });
+  });
+
+  /* ---- revenue ---- */
+  let revTotal=0, orderCount=0;
+  const byOwner={}, byMonth=new Map(), revByCompany=new Map(), ordByCompany=new Map();
+  Object.keys(OWNERS).concat([OTHER]).forEach(k=>byOwner[k]={rev:0,orders:0,accts:new Set()});
+
+  orders.forEach(o=>{
+    const v=parseFloat(o.properties.hs_total_price)||0; if(v<=0)return;
+    const t=Date.parse(o.properties.hs_external_created_date); if(isNaN(t))return;
+    revTotal+=v; orderCount++;
+    const mk=new Date(t).toISOString().slice(0,7);
+    byMonth.set(mk,(byMonth.get(mk)||0)+v);
+    const cids=o2c.get(String(o.id))||[];
+    const cid=cids[0];
+    if(cid){
+      revByCompany.set(cid,(revByCompany.get(cid)||0)+v);
+      ordByCompany.set(cid,(ordByCompany.get(cid)||0)+1);
+      const c=co.get(cid);
+      const k=c?c.owner:OTHER;
+      byOwner[k].rev+=v; byOwner[k].orders++; byOwner[k].accts.add(cid);
+    } else {
+      byOwner[OTHER].rev+=v; byOwner[OTHER].orders++;
+    }
+  });
+
+  /* ---- leads (new accounts) in range ---- */
+  const newAccts=[...co.values()].filter(c=>c.created && c.created>=from && c.created<=to);
+  const isOut=c=>OUTBOUND_TOKENS.some(t=>c.src.includes(t));
+  const isIn =c=>INBOUND_TOKENS.some(t=>c.src.includes(t));
+  const inbound=newAccts.filter(isIn).length;
+  const outbound=newAccts.filter(isOut).length;
+  const unknownSrc=newAccts.length-inbound-outbound;
+
+  const converted=newAccts.filter(c=>c.firstOrder);
+  const closeRate=pct(converted.length,newAccts.length);
+  const daysToClose=converted.map(c=>dayDiff(c.firstOrder,c.created)).filter(d=>d>=0);
+  const medDays=median(daysToClose);
+
+  /* ---- per rep ---- */
+  const reps=Object.keys(OWNERS).concat([OTHER]).map(k=>{
+    const mine=newAccts.filter(c=>c.owner===k);
+    const conv=mine.filter(c=>c.firstOrder);
+    const d=conv.map(c=>dayDiff(c.firstOrder,c.created)).filter(x=>x>=0);
+    const wonDeals=deals.filter(dl=>ownerKey(dl.properties.hubspot_owner_id)===k
+      && dl.properties.hs_is_closed_won==='true'
+      && dl.properties.closedate && Date.parse(dl.properties.closedate)>=from && Date.parse(dl.properties.closedate)<=to).length;
+    return {key:k,name:ownerName(k),role:k===OTHER?'—':OWNERS[k].role,
+      rev:byOwner[k].rev, orders:byOwner[k].orders, accts:byOwner[k].accts.size,
+      leads:mine.length, outbound:mine.filter(isOut).length, closed:conv.length,
+      rate:pct(conv.length,mine.length), med:median(d), wonDeals};
+  }).sort((a,b)=>b.rev-a.rev);
+
+  /* ---- enterprise ---- */
+  const entCos=[...co.values()].filter(c=>c.segment===ENTERPRISE_VALUE);
+  const entRev=entCos.reduce((s,c)=>s+(revByCompany.get(c.id)||0),0);
+  const taggedAny=[...co.values()].filter(c=>c.segment).length;
+
+  /* ---- at risk ---- */
+  const customers=[...co.values()].filter(c=>c.aov>0 || c.life==='customer');
+  const withLast=customers.filter(c=>c.lastOrder);
+  const churned=withLast.filter(c=>dayDiff(now,c.lastOrder)>CHURN_DAYS).sort((a,b)=>b.aov-a.aov);
+  const slipping=withLast.filter(c=>{const d=dayDiff(now,c.lastOrder); return d>SLIP_DAYS && d<=CHURN_DAYS;}).sort((a,b)=>b.aov-a.aov);
+
+  return {co,revTotal,orderCount,byOwner,byMonth,revByCompany,ordByCompany,
+    newAccts,inbound,outbound,unknownSrc,converted,closeRate,medDays,reps,
+    entCos,entRev,taggedAny,customers,churned,slipping};
+}
+
+function computeProducts(C){
+  const {o2l,items}=PRODUCTS;
+  const bySku=new Map(), byTier=new Map(), matchaByOwner={};
+  let matchaRev=0, matchaPL=0, matchaCat=0, allocTotal=0, noLine=0;
+  const matchaByMonth=new Map();
+
+  CORE.orders.forEach(o=>{
+    const total=parseFloat(o.properties.hs_total_price)||0; if(total<=0)return;
+    const t=Date.parse(o.properties.hs_external_created_date);
+    const lids=o2l.get(String(o.id))||[];
+    if(!lids.length){ noLine++; return; }
+    const lines=lids.map(id=>items.get(id)).filter(Boolean).map(p=>({
+      sku:p.hs_sku||'', name:p.name||'', qty:parseFloat(p.quantity)||0, price:parseFloat(p.price)||0}));
+    const gross=lines.reduce((s,l)=>s+l.price*l.qty,0);
+    // Order-level discounts live only on the order. Spread them across the lines
+    // pro-rata so product revenue reconciles to the order total.
+    let f = gross>0 ? total/gross : 1;
+    if(!isFinite(f) || f<0) f=1; if(f>2) f=2;
+    const cid=(C && (CORE.o2c.get(String(o.id))||[])[0])||null;
+    const owner=cid&&C.co.get(cid)?C.co.get(cid).owner:OTHER;
+
+    lines.forEach(l=>{
+      const val=l.price*l.qty*f; if(!(val>0))return;
+      allocTotal+=val;
+      const tier=tierOf(l.sku);
+      if(tier) byTier.set(tier,(byTier.get(tier)||0)+val);
+      if(isMatcha(l.sku,l.name)){
+        matchaRev+=val;
+        const pl=isPrivateLabel(l.name);
+        if(pl) matchaPL+=val; else matchaCat+=val;
+        const k=l.sku||l.name;
+        const cur=bySku.get(k)||{sku:l.sku,name:l.name,units:0,rev:0,pl,tier};
+        cur.units+=l.qty; cur.rev+=val; bySku.set(k,cur);
+        matchaByOwner[owner]=(matchaByOwner[owner]||0)+val;
+        if(!isNaN(t)){ const mk=new Date(t).toISOString().slice(0,7); matchaByMonth.set(mk,(matchaByMonth.get(mk)||0)+val); }
+      }
+    });
+  });
+  const top=[...bySku.values()].sort((a,b)=>b.rev-a.rev);
+  return {matchaRev,matchaPL,matchaCat,allocTotal,top,byTier,matchaByOwner,matchaByMonth,noLine};
+}
+
+/* ══════════════════════════ CHARTS (hand-rolled SVG) ══════════════════════════ */
+/* horizontal bars — magnitude, one hue (sequential). Rounded data-end, 2px gaps. */
+function hbar(rows,{fmt=fmtUSD,color='var(--ord-3)',h=30,gap=9,labelW=150}={}){
+  if(!rows.length||!rows.some(r=>r.v>0)) return '<div class="empty">No data in this range.</div>';
+  const max=Math.max(...rows.map(r=>r.v))||1;
+  return `<div class="hb" style="display:grid;grid-template-columns:${labelW}px 1fr 88px;gap:0 10px;align-items:center">`+
+    rows.map(r=>{
+      const w=Math.max(r.v>0?1.5:0,(r.v/max)*100);
+      const c=r.color||color;
+      return `<div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:5px 0" title="${esc(r.k)}">${esc(r.k)}</div>
+      <div style="padding:5px 0"><div style="height:${h-12}px;border-radius:0 4px 4px 0;background:${c};width:${w}%;min-width:2px"
+        data-tip="${esc(r.k)} — ${esc(r.tip||fmt(r.v))}"></div></div>
+      <div class="num" style="font-size:13px;font-variant-numeric:tabular-nums;color:var(--ink-2);padding:5px 0">${fmt(r.v)}</div>`;
+    }).join('')+`</div>`;
+}
+/* part-to-whole: one stacked horizontal bar, 2px surface gaps, direct labels */
+function stackbar(parts,total,fmt){
+  const f=fmt||fmtUSDk;
+  const t=total||parts.reduce((s,p)=>s+p.v,0)||1;
+  return `<div style="display:flex;height:26px;border-radius:6px;overflow:hidden;gap:2px;background:var(--surface)">`+
+    parts.map(p=>{
+      const w=p.v/t*100; if(w<=0)return '';
+      return `<div style="width:${w}%;background:${p.color}" data-tip="${esc(p.k)} — ${f(p.v)} (${fmtPct(w)})"></div>`;
+    }).join('')+`</div>
+    <div class="legend" style="margin-top:11px">`+
+    parts.map(p=>`<span><i style="background:${p.color}"></i>${esc(p.k)} <b>${fmtPct(pct(p.v,t))}</b> <span class="dim">${f(p.v)}</span></span>`).join('')+
+    `</div>`;
+}
+/* trend line — 2px stroke, markers >=8px, tooltip via per-point hit targets */
+function lineChart(series,{h=190,fmt=fmtUSDk}={}){
+  const pts=series.filter(p=>p.v!=null);
+  if(pts.length<2) return '<div class="empty">Not enough months in this range to draw a trend.</div>';
+  const W=1000,PAD_L=52,PAD_R=14,PAD_T=14,PAD_B=26;
+  const max=Math.max(...pts.map(p=>p.v))*1.12||1;
+  const x=i=>PAD_L+i*((W-PAD_L-PAD_R)/(pts.length-1));
+  const y=v=>PAD_T+(1-v/max)*(h-PAD_T-PAD_B);
+  const d=pts.map((p,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+  const ticks=[0,.5,1].map(f=>{const v=max*f;return `<line x1="${PAD_L}" x2="${W-PAD_R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/>
+    <text x="${PAD_L-8}" y="${y(v)+4}" text-anchor="end" font-size="11" fill="var(--ink-muted)" style="font-variant-numeric:tabular-nums">${fmt(v)}</text>`;}).join('');
+  return `<svg viewBox="0 0 ${W} ${h}" style="width:100%;height:${h}px" role="img" aria-label="Revenue by month">
+    ${ticks}
+    <path d="${d}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${pts.map((p,i)=>`<circle cx="${x(i)}" cy="${y(p.v)}" r="4.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/>
+      <rect x="${x(i)-18}" y="${PAD_T}" width="36" height="${h-PAD_T-PAD_B}" fill="transparent"
+        data-tip="${esc(p.k)} — ${fmt(p.v)}"/>
+      <text x="${x(i)}" y="${h-8}" text-anchor="middle" font-size="11" fill="var(--ink-muted)">${esc(p.k)}</text>`).join('')}
+  </svg>`;
+}
+function tile(lab,val,sub,tip,cls){
+  return `<div class="tile ${cls||''}"><div class="lab">${esc(lab)}${tip?I(tip):''}</div>
+    <div class="val">${val}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>`;
+}
+
+/* ══════════════════════════ RENDER ══════════════════════════ */
+function render(){
+  const C=computeCore();
+  window.__C=C;
+  renderOverview(C); renderTeam(C); renderAccounts(C); renderDefs(C);
+  $('#p-prod').innerHTML=`<div class="inline-load">Loading product &amp; matcha detail…</div>`;
+  bindTips();
+  loadProductsIfNeeded();
+}
+
+function renderOverview(C){
+  const months=[...C.byMonth.entries()].sort().map(([k,v])=>({
+    k:new Date(k+'-02').toLocaleDateString('en-US',{month:'short'}),v}));
+  const entPct=pct(C.entRev,C.revTotal);
+  const cov=pct(C.taggedAny,C.co.size);
+
+  $('#p-ov').innerHTML=`
+  <div class="grid g4" style="margin-bottom:16px">
+    ${tile('Wholesale revenue',fmtUSD(C.revTotal),
+      `${fmtN(C.orderCount)} paid orders · AOV ${fmtUSD(C.revTotal/(C.orderCount||1))}`,
+      'Sum of Total Price on every HubSpot Order with a value above $0, dated by the Shopify order date. Wholesale only — the B2C retail store is a separate Shopify and does not reach HubSpot.','hero')}
+    ${tile('Incoming leads',fmtN(C.newAccts.length),
+      `${fmtN(C.inbound)} inbound · ${fmtN(C.outbound)} outbound`,
+      'New company records created in the selected range. Counted at account level, not contact level, because Spirit Tea sells to businesses. Inbound vs outbound comes from Original Traffic Source Drill-Down 1.')}
+    ${tile('Lead-to-close',fmtPct(C.closeRate),
+      C.medDays!=null?`${fmtN(C.medDays)} days median to first order`:'No conversions yet in this cohort',
+      'Of the accounts created in this range, the share that has since placed a first paid order — measured to today, not inside the range. A short range will always look low, because those leads have not had time to convert yet.')}
+    ${tile('Enterprise share',fmtPct(entPct),
+      `${fmtUSDk(C.entRev)} from ${fmtN(C.entCos.length)} tagged accounts`,
+      'Revenue from accounts whose Segment is Enterprise, as a share of total wholesale revenue. Only counts accounts the team has actually tagged — see the coverage note below.')}
+  </div>
+
+  ${cov<25?`<div class="note"><b>Segment tagging is ${fmtPct(cov,0)} complete.</b>
+    ${fmtN(C.taggedAny)} of ${fmtN(C.co.size)} accounts carry a Segment, and only ${fmtN(C.entCos.length)} are tagged Enterprise.
+    Enterprise share is therefore a floor, not the real number — the true figure is higher. Tagging the remaining accounts is the single change that would most improve this dashboard.</div>`:''}
+
+  <div class="grid g2">
+    <div class="card">
+      <h2>Revenue by month</h2>
+      <p class="cap">Total wholesale revenue recognised on the Shopify order date.</p>
+      ${lineChart(months)}
+    </div>
+    <div class="card">
+      <h2>Where revenue comes from</h2>
+      <p class="cap">Enterprise-tagged accounts versus everyone else.</p>
+      ${stackbar([
+        {k:'Enterprise',v:C.entRev,color:'var(--s1)'},
+        {k:'All other accounts',v:Math.max(0,C.revTotal-C.entRev),color:'var(--s3)'}
+      ],C.revTotal)}
+      <div style="margin-top:18px">
+        <h2 style="font-size:13px;margin-bottom:2px">Lead sources</h2>
+        <p class="cap" style="margin-bottom:11px">New accounts this range, by how they entered the CRM.</p>
+        ${stackbar([
+          {k:'Inbound',v:C.inbound,color:'var(--s3)'},
+          {k:'Outbound',v:C.outbound,color:'var(--s2)'},
+          {k:'Unclassified',v:C.unknownSrc,color:'var(--axis)'}
+        ],C.newAccts.length||1,fmtN)}
+      </div>
+    </div>
+  </div>
+
+  <div class="grid g4">
+    ${tile('Accounts at risk',fmtN(C.churned.length),
+      `No order in over ${CHURN_DAYS} days`,
+      `Customer accounts whose last order is more than ${CHURN_DAYS} days ago. This is the churn definition the team agreed: over a year with no order.`)}
+    ${tile('Slipping accounts',fmtN(C.slipping.length),
+      `Quiet ${SLIP_DAYS}–${CHURN_DAYS} days — still rescuable`,
+      `Customers who have gone quiet for ${SLIP_DAYS}–${CHURN_DAYS} days. They have not churned yet, so this is the list worth acting on now.`)}
+    ${tile('Active customers',fmtN(C.revByCompany.size),
+      'Accounts that ordered in this range',
+      'Distinct companies with at least one paid order inside the selected range.')}
+    ${tile('Enterprise accounts',fmtN(C.entCos.length),
+      `Avg ${fmtUSD(C.entCos.length?C.entRev/C.entCos.length:0)} each this range`,
+      'Accounts tagged Segment = Enterprise. Sub-types are Distributor, Private Label and Coffee Chain.')}
+  </div>`;
+}
+
+function renderTeam(C){
+  const rows=C.reps.filter(r=>r.rev>0||r.leads>0||r.accts>0);
+  const revRows=rows.filter(r=>r.rev>0).map(r=>({k:r.name,v:r.rev,
+    color:r.key===OTHER?'var(--axis)':'var(--ord-3)'}));
+  const other=C.reps.find(r=>r.key===OTHER);
+
+  $('#p-team').innerHTML=`
+  ${other&&other.rev>0?`<div class="note"><b>${fmtUSDk(other.rev)} (${fmtPct(pct(other.rev,C.revTotal))}) sits under "Unassigned / other".</b>
+    That is revenue on accounts owned by nobody, by a deactivated user, or by someone outside the sales and CS teams. It is shown rather than hidden because the same owner field feeds commission.</div>`:''}
+
+  <div class="card">
+    <h2>Revenue per rep ${I('Revenue is attributed through the account: every paid order is credited to the owner of the company it belongs to. This is a book-of-business view — if an account changes hands, its past revenue moves with it. Deal amounts are not used because won deals at Spirit Tea carry $0; the money always lands on the order.')}</h2>
+    <p class="cap">Paid orders in this range, credited to the account owner.</p>
+    ${hbar(revRows)}
+  </div>
+
+  <div class="card">
+    <h2>Full team detail</h2>
+    <p class="cap">Sales and Customer Success shown together; roles are marked.</p>
+    <div class="tblwrap"><table>
+      <thead><tr>
+        <th>Rep</th><th>Role</th>
+        <th class="num">Revenue</th><th class="num">Orders</th><th class="num">Accounts</th>
+        <th class="num">New leads</th><th class="num">Outbound</th><th class="num">Closed</th>
+        <th class="num">Close rate</th><th class="num">Median days</th><th class="num">Deals won</th>
+      </tr></thead>
+      <tbody>${rows.map(r=>`<tr>
+        <td class="nm">${esc(r.name)}</td>
+        <td><span class="pill ${r.role==='Sales'?'sales':r.role==='CS'?'cs':'none'}">${esc(r.role)}</span></td>
+        <td class="num nm">${fmtUSD(r.rev)}</td>
+        <td class="num dim">${fmtN(r.orders)}</td>
+        <td class="num dim">${fmtN(r.accts)}</td>
+        <td class="num">${fmtN(r.leads)}</td>
+        <td class="num dim">${fmtN(r.outbound)}</td>
+        <td class="num">${fmtN(r.closed)}</td>
+        <td class="num">${r.leads?fmtPct(r.rate):'—'}</td>
+        <td class="num dim">${r.med!=null?fmtN(r.med):'—'}</td>
+        <td class="num dim">${fmtN(r.wonDeals)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>
+
+  <div class="grid g2">
+    <div class="card">
+      <h2>Outbound leads generated ${I('New accounts created in this range whose Original Traffic Source Drill-Down 1 is an outbound source: import, extension, CRM UI, presentations, mobile, BCC or sales. Inbound is the Shopify store and web entries.')}</h2>
+      <p class="cap">Accounts a rep put into the CRM, rather than ones that arrived on their own.</p>
+      ${hbar(rows.filter(r=>r.outbound>0).map(r=>({k:r.name,v:r.outbound})),{fmt:fmtN,color:'var(--s2)'})}
+    </div>
+    <div class="card">
+      <h2>Leads closed ${I('Accounts created in this range, owned by this rep, that have since placed a first paid order.')}</h2>
+      <p class="cap">New accounts that went on to place a first paid order.</p>
+      ${hbar(rows.filter(r=>r.closed>0).map(r=>({k:r.name,v:r.closed})),{fmt:fmtN,color:'var(--s3)'})}
+    </div>
+  </div>`;
+}
+
+function renderAccounts(C){
+  const entRows=C.entCos.map(c=>({c,rev:C.revByCompany.get(c.id)||0,ord:C.ordByCompany.get(c.id)||0}))
+    .sort((a,b)=>b.rev-a.rev);
+  const riskTable=(list,title,cap,tip)=>`
+    <div class="card">
+      <h2>${title} ${I(tip)}</h2>
+      <p class="cap">${cap}</p>
+      ${list.length?`<div class="tblwrap"><table>
+        <thead><tr><th>Account</th><th>Owner</th><th class="num">Avg order value</th><th class="num">Days quiet</th><th class="num">Last order</th></tr></thead>
+        <tbody>${list.slice(0,40).map(c=>`<tr>
+          <td class="nm"><a href="${HS_CO}${c.id}" target="_blank" rel="noopener">${esc(c.name)}</a></td>
+          <td class="dim">${esc(ownerName(c.owner))}</td>
+          <td class="num nm">${fmtUSD(c.aov)}</td>
+          <td class="num">${fmtN(dayDiff(Date.now(),c.lastOrder))}</td>
+          <td class="num dim">${new Date(c.lastOrder).toLocaleDateString('en-US',{day:'2-digit',month:'short',year:'numeric'})}</td>
+        </tr>`).join('')}</tbody></table></div>
+        ${list.length>40?`<p class="cap" style="margin:11px 0 0">Showing the 40 largest by order value, of ${fmtN(list.length)}.</p>`:''}`
+      :'<div class="empty">Nothing in this bucket.</div>'}
+    </div>`;
+
+  $('#p-acct').innerHTML=`
+  <div class="card">
+    <h2>Enterprise accounts ${I('Accounts tagged Segment = Enterprise in HubSpot. Revenue is their paid orders inside the selected range. Only tagged accounts appear — untagged Enterprise accounts are invisible here and make the total a floor.')}</h2>
+    <p class="cap">${fmtN(C.entCos.length)} tagged accounts · ${fmtUSD(C.entRev)} in this range · ${fmtPct(pct(C.entRev,C.revTotal))} of wholesale revenue.</p>
+    ${entRows.length?`<div class="tblwrap"><table>
+      <thead><tr><th>Account</th><th>Type</th><th>Owner</th><th class="num">Revenue</th><th class="num">Orders</th><th class="num">Avg order value</th></tr></thead>
+      <tbody>${entRows.map(r=>`<tr>
+        <td class="nm"><a href="${HS_CO}${r.c.id}" target="_blank" rel="noopener">${esc(r.c.name)}</a></td>
+        <td>${r.c.entType?`<span class="pill ent">${esc(r.c.entType)}</span>`:'<span class="pill none">Not set</span>'}</td>
+        <td class="dim">${esc(ownerName(r.c.owner))}</td>
+        <td class="num nm">${fmtUSD(r.rev)}</td>
+        <td class="num dim">${fmtN(r.ord)}</td>
+        <td class="num dim">${fmtUSD(r.c.aov)}</td>
+      </tr>`).join('')}</tbody></table></div>`:'<div class="empty">No Enterprise-tagged accounts found.</div>'}
+  </div>
+
+  ${riskTable(C.slipping,'Slipping accounts','Customers who have gone quiet but have not churned yet. This is the actionable list.',
+    `Customers whose last order is ${SLIP_DAYS}–${CHURN_DAYS} days ago. Ranked by their typical order value, so the biggest accounts surface first.`)}
+
+  ${riskTable(C.churned,'At-risk / churned accounts','Customers with no order in over a year.',
+    `Customers whose last order is more than ${CHURN_DAYS} days ago — the churn definition the team agreed. Ranked by typical order value.`)}`;
+}
+
+function renderProducts(C,P){
+  const mPct=pct(P.matchaRev,P.allocTotal);
+  const tiers=[['T1','var(--ord-3)'],['T2','var(--ord-2)'],['T3','var(--ord-1)']]
+    .map(([t,c])=>({k:t+' — '+(t==='T1'?'premium':t==='T2'?'mid':'entry'),v:P.byTier.get(t)||0,color:c}));
+  const tierTotal=tiers.reduce((s,t)=>s+t.v,0);
+  const mm=[...P.matchaByMonth.entries()].sort().map(([k,v])=>({
+    k:new Date(k+'-02').toLocaleDateString('en-US',{month:'short'}),v}));
+
+  $('#p-prod').innerHTML=`
+  <div class="note note-info"><b>How product revenue is calculated.</b>
+    Line items carry the base tier price, while discounts exist only at order level. Every order's discount is therefore spread across its lines
+    pro-rata, so the product numbers below add up to the same revenue total shown on the Overview.
+    Matcha is matched on the line item's own SKU, which captures private-label and archived matcha that is hidden from the storefront.
+    ${P.noLine?`${fmtN(P.noLine)} orders had no line items and are excluded from this tab only.`:''}</div>
+
+  <div class="grid g4" style="margin-bottom:16px">
+    ${tile('Matcha revenue',fmtUSD(P.matchaRev),`${fmtPct(mPct)} of wholesale revenue`,
+      'Revenue from every matcha line item in the range, after spreading order-level discounts across the lines.','hero')}
+    ${tile('Private-label matcha',fmtUSD(P.matchaPL),`${fmtPct(pct(P.matchaPL,P.matchaRev||1))} of matcha`,
+      'Matcha packaged under a customer’s own brand — Verve, Harmony Leaf, Alfred’s and similar. These SKUs are hidden from the storefront, which is why a storefront-only view misses most matcha revenue.')}
+    ${tile('Catalogue matcha',fmtUSD(P.matchaCat),`${fmtPct(pct(P.matchaCat,P.matchaRev||1))} of matcha`,
+      'Matcha sold under the Spirit Tea catalogue rather than a customer brand.')}
+    ${tile('Matcha SKUs sold',fmtN(P.top.length),'Distinct matcha SKUs with revenue',
+      'Number of distinct matcha SKUs that generated revenue in this range.')}
+  </div>
+
+  <div class="grid g2">
+    <div class="card">
+      <h2>Matcha as a share of revenue</h2>
+      <p class="cap">Split by whether the matcha carries a customer's brand or Spirit Tea's.</p>
+      ${stackbar([
+        {k:'Private-label matcha',v:P.matchaPL,color:'var(--s1)'},
+        {k:'Catalogue matcha',v:P.matchaCat,color:'var(--s4)'},
+        {k:'Everything else',v:Math.max(0,P.allocTotal-P.matchaRev),color:'var(--s3)'}
+      ],P.allocTotal)}
+      <div style="margin-top:20px">
+        <h2 style="font-size:13px;margin-bottom:2px">Matcha revenue by month</h2>
+        <p class="cap" style="margin-bottom:8px">Private-label orders are large and irregular, so this line is lumpy by nature.</p>
+        ${lineChart(mm)}
+      </div>
+    </div>
+    <div class="card">
+      <h2>Product tier mix ${I('Tier is read from the SKU, which encodes it as tier1 / tier2 / tier3. Tier reflects the quality and cost of the leaf Spirit Tea buys, not the size of the customer. Lines whose SKU carries no tier are excluded.')}</h2>
+      <p class="cap">Revenue by leaf tier — the "finesse versus volume" view.</p>
+      ${stackbar(tiers,tierTotal)}
+      <div style="margin-top:20px">
+        <h2 style="font-size:13px;margin-bottom:2px">Matcha revenue by rep</h2>
+        <p class="cap" style="margin-bottom:11px">Credited through the account owner, same as all revenue here.</p>
+        ${hbar(Object.entries(P.matchaByOwner).map(([k,v])=>({k:ownerName(k),v,
+          color:k===OTHER?'var(--axis)':'var(--ord-3)'})).sort((a,b)=>b.v-a.v))}
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Which matcha items drive revenue</h2>
+    <p class="cap">Every matcha SKU with revenue in this range, largest first.</p>
+    ${P.top.length?`<div class="tblwrap"><table>
+      <thead><tr><th>Product</th><th>SKU</th><th>Type</th><th>Tier</th><th class="num">Units</th><th class="num">Revenue</th><th class="num">% of matcha</th></tr></thead>
+      <tbody>${P.top.map(r=>`<tr>
+        <td class="nm">${esc(r.name||'(unnamed)')}</td>
+        <td class="dim" style="font-size:12px">${esc(r.sku||'—')}</td>
+        <td>${r.pl?'<span class="pill ent">Private label</span>':'<span class="pill none">Catalogue</span>'}</td>
+        <td class="dim">${r.tier||'—'}</td>
+        <td class="num dim">${fmtN(r.units)}</td>
+        <td class="num nm">${fmtUSD(r.rev)}</td>
+        <td class="num">${fmtPct(pct(r.rev,P.matchaRev||1))}</td>
+      </tr>`).join('')}</tbody></table></div>`:'<div class="empty">No matcha revenue in this range.</div>'}
+  </div>`;
+  bindTips($('#p-prod'));
+}
+
+function renderDefs(C){
+  const cov=pct(C.taggedAny,C.co.size);
+  $('#p-def').innerHTML=`
+  <div class="card">
+    <h2>What each number means</h2>
+    <p class="cap">Every metric on this dashboard, in plain terms. Hover the small <span class="info" style="opacity:1">i</span> next to any figure to see the same note in place.</p>
+    <div class="tblwrap"><table>
+      <thead><tr><th style="width:210px">Metric</th><th>Definition</th></tr></thead>
+      <tbody>
+      <tr><td class="nm">Wholesale revenue</td><td>Every HubSpot Order above $0 in the range, dated by the Shopify order date. This is the complete B2B figure — it includes the large private-label draft orders that never pass through web checkout.</td></tr>
+      <tr><td class="nm">Incoming leads</td><td>New company records created in the range. Counted as accounts, not contacts, because Spirit Tea sells to businesses and contact counts are inflated by the Shopify sync and B2C newsletter signups.</td></tr>
+      <tr><td class="nm">Lead-to-close</td><td>Of the accounts created in the range, the share that has since placed a first paid order — measured to today. A short range always reads low, because recent leads have not had time to convert.</td></tr>
+      <tr><td class="nm">Median days to close</td><td>Middle value of the gap between account creation and first paid order, for accounts in the range that converted.</td></tr>
+      <tr><td class="nm">Revenue per rep</td><td>Paid orders credited to the owner of the account the order belongs to. A book-of-business view: reassigning an account moves its history too. Won deals are not used — at Spirit Tea a won deal carries $0 and the money lands on the order.</td></tr>
+      <tr><td class="nm">Outbound leads</td><td>New accounts whose Original Traffic Source Drill-Down 1 is an outbound source (import, extension, CRM UI, presentations, mobile, BCC, sales). Inbound is the Shopify store and web entries.</td></tr>
+      <tr><td class="nm">At risk / churned</td><td>Customer accounts with no order in more than ${CHURN_DAYS} days — the definition the team agreed.</td></tr>
+      <tr><td class="nm">Slipping</td><td>Customers quiet for ${SLIP_DAYS}–${CHURN_DAYS} days. Not churned yet, so this is where action still changes the outcome.</td></tr>
+      <tr><td class="nm">Enterprise</td><td>Accounts tagged Segment = Enterprise, with sub-types Distributor, Private Label and Coffee Chain.</td></tr>
+      <tr><td class="nm">Matcha revenue</td><td>All matcha line items, matched on the SKU so private-label and archived matcha count too, with order-level discounts spread across lines so the total reconciles to revenue.</td></tr>
+      <tr><td class="nm">Product tier</td><td>T1/T2/T3 read from the SKU. Tier describes the leaf Spirit Tea buys — quality, availability and cost — not the size of the customer.</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>What this dashboard cannot see</h2>
+    <p class="cap">Worth knowing before drawing conclusions.</p>
+    <div class="tblwrap"><table>
+      <tbody>
+      <tr><td class="nm" style="width:210px">Retail (B2C)</td><td>The consumer store runs on a separate Shopify that does not sync into HubSpot. Every figure here is wholesale. Matcha is a far larger share of the retail business than of wholesale, so the matcha percentage on this dashboard understates matcha's role in the company overall.</td></tr>
+      <tr><td class="nm">Untagged segments</td><td>Only ${fmtPct(cov,0)} of accounts carry a Segment, and ${fmtN(C.entCos.length)} are tagged Enterprise. Enterprise share is a floor. Tagging is the single highest-value fix.</td></tr>
+      <tr><td class="nm">Google Analytics</td><td>GA4 sees roughly half of wholesale revenue, because negotiated and private-label orders are created as drafts and skip web checkout. HubSpot is the complete picture; the two should never be reconciled against each other.</td></tr>
+      <tr><td class="nm">Deal values</td><td>Deals carry $0 and no line items today. Once reps build deals from the product library for the Cin7 rollout, product mix and forecasting become measurable at deal stage too — not only after the order exists.</td></tr>
+      </tbody>
+    </table></div>
+  </div>`;
+  bindTips($('#p-def'));
+}
+
+/* ══════════════════════════ ORCHESTRATION ══════════════════════════ */
+async function loadProductsIfNeeded(){
+  const ck=RANGE.key+'|'+iso(RANGE.from)+'|'+iso(RANGE.to);
+  if(CACHE[ck]&&CACHE[ck].products){ PRODUCTS=CACHE[ck].products; renderProducts(window.__C,computeProducts(window.__C)); return; }
+  try{
+    PRODUCTS=await loadProducts();
+    CACHE[ck]=CACHE[ck]||{}; CACHE[ck].products=PRODUCTS;
+    renderProducts(window.__C,computeProducts(window.__C));
+  }catch(e){
+    $('#p-prod').innerHTML=`<div class="card"><h2>Product detail unavailable</h2>
+      <p class="cap">${esc(e.message)}</p></div>`;
+  }
+}
+
+async function run(){
+  const ck=RANGE.key+'|'+iso(RANGE.from)+'|'+iso(RANGE.to);
+  $('#app').hidden=false; $('#load').hidden=false;
+  $('#rangelabel').textContent=
+    RANGE.from.toLocaleDateString('en-US',{day:'2-digit',month:'short',year:'numeric'})+' — '+
+    RANGE.to.toLocaleDateString('en-US',{day:'2-digit',month:'short',year:'numeric'})+' · wholesale (B2B)';
+  try{
+    if(CACHE[ck]&&CACHE[ck].core){ CORE=CACHE[ck].core; }
+    else { CORE=await loadCore(); CACHE[ck]=CACHE[ck]||{}; CACHE[ck].core=CORE; }
+    PRODUCTS=(CACHE[ck]&&CACHE[ck].products)||null;
+    render();
+    $('#stamp').textContent='Last refreshed '+new Date().toLocaleString('en-US',
+      {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+  }catch(e){
+    $('#p-ov').innerHTML=`<div class="card"><h2>Could not load data</h2>
+      <p class="cap">${esc(e.message)}</p>
+      <button class="btn" onclick="location.reload()">Try again</button></div>`;
+    console.error(e);
+  }
+  $('#load').hidden=true;
+}
+
+/* ══════════════════════════ EVENTS ══════════════════════════ */
+function setRange(key,from,to){
+  RANGE={key,...(from&&to?{from,to}:computeRange(key))};
+  $$('.chip[data-range]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.range===key)));
+  run();
+}
+$$('.chip[data-range]').forEach(b=>b.addEventListener('click',()=>setRange(b.dataset.range)));
+$('#apply').addEventListener('click',()=>{
+  const a=$('#d1').value,b=$('#d2').value;
+  if(!a||!b){alert('Pick both dates.');return;}
+  const f=new Date(a+'T00:00:00Z'),t=new Date(b+'T23:59:59Z');
+  if(f>t){alert('The start date is after the end date.');return;}
+  $$('.chip[data-range]').forEach(x=>x.setAttribute('aria-pressed','false'));
+  setRange('custom',f,t);
+});
+$$('.tab').forEach(t=>t.addEventListener('click',()=>{
+  $$('.tab').forEach(x=>x.setAttribute('aria-selected',String(x===t)));
+  $$('.panel').forEach(p=>p.classList.toggle('active',p.id==='p-'+t.dataset.tab));
+}));
+$('#refresh').addEventListener('click',()=>{ for(const k in CACHE)delete CACHE[k]; run(); });
+$('#out').addEventListener('click',()=>{
+  try{sessionStorage.removeItem('st_founder')}catch(e){}
+  location.reload();
+});
+
+function auth(){
+  const em=($('#em').value||'').trim().toLowerCase(), pw=$('#pw').value||'';
+  const err=$('#aerr');
+  if(!ALLOWED.includes(em)){ err.hidden=false; err.textContent='That email is not on the access list for this dashboard.'; return; }
+  if(pw!==PASSWORD){ err.hidden=false; err.textContent='Incorrect password.'; return; }
+  try{sessionStorage.setItem('st_founder',em)}catch(e){}
+  $('#auth').hidden=true;
+  setRange('ytd');
+}
+$('#go').addEventListener('click',auth);
+['em','pw'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{if(e.key==='Enter')auth();}));
+
+/* boot */
+(function(){
+  const d2=new Date(), d1=new Date(Date.UTC(2026,0,1));
+  $('#d1').value=iso(d1); $('#d2').value=iso(d2);
+  let who=null; try{who=sessionStorage.getItem('st_founder')}catch(e){}
+  if(who&&ALLOWED.includes(who)){ $('#auth').hidden=true; setRange('ytd'); }
+})();
+</script>
+</body>
+</html>
