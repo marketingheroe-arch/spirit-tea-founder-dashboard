@@ -527,6 +527,7 @@ function computeCore(){
       src:(p.hs_analytics_source_data_1||'').toLowerCase(),
       recSrc:p.hs_object_source_label||'',
       contacts:parseInt(p.num_associated_contacts)||0,
+      deals:parseInt(p.num_associated_deals)||0,
       country:p.country||''
     });
   });
@@ -556,10 +557,14 @@ function computeCore(){
   });
 
   /* ---- leads (new accounts) in range ----
-     A company with no contact at all is not a lead: it is a shell the system minted when it
-     linked an email domain. Those are excluded from the lead count instead of inflating it. */
+     An account counts as a lead if there is any evidence of a real business behind it:
+     a contact, a deal, or money. Requiring a contact alone would drop genuine customers,
+     because the Shopify contact sync excludes some buyers and their orders land on the
+     company with no contact beside them. What is left out is only the true shells the CRM
+     mints from an email domain — no contact, no deal, no order. */
   const created=[...co.values()].filter(c=>c.created && c.created>=from && c.created<=to);
-  const newAccts=created.filter(c=>c.contacts>0);
+  const isReal=c=>c.contacts>0 || c.deals>0 || c.aov>0 || !!c.firstOrder;
+  const newAccts=created.filter(isReal);
   const shells=created.length-newAccts.length;
 
   const inbound  = newAccts.filter(c=>classifyLead(c)==='in').length;
@@ -720,7 +725,7 @@ function renderOverview(C){
       'Sum of Total Price on every HubSpot Order with a value above $0, dated by the Shopify order date. Wholesale only — the B2C retail store is a separate Shopify and does not reach HubSpot.','hero')}
     ${tile('Incoming leads',fmtN(C.newAccts.length),
       `${fmtN(C.inbound)} inbound · ${fmtN(C.outbound)} outbound`,
-      `New accounts created in the selected range that have at least one contact on them. Counted at account level, not contact level, because Spirit Tea sells to businesses.${C.shells?` ${fmtN(C.shells)} empty company records were created in this range with no contact, no deal and no order — the CRM mints those automatically from email domains, so they are excluded here rather than counted as leads.`:''}`)}
+      `New accounts created in the selected range with something real behind them — a contact, a deal, or an order. Counted at account level, not contact level, because Spirit Tea sells to businesses.${C.shells?` ${fmtN(C.shells)} empty company records created in this range are excluded: no contact, no deal and no order. The CRM mints those automatically from email domains, and counting them would overstate lead generation.`:''}`)}
     ${tile('Lead-to-close',fmtPct(C.closeRate),
       C.medDays!=null?`${fmtN(C.medDays)} days median to first order`:'No conversions yet in this cohort',
       'Of the accounts created in this range, the share that has since placed a first paid order — measured to today, not inside the range. A short range will always look low, because those leads have not had time to convert yet.')}
@@ -957,7 +962,7 @@ function renderDefs(C){
       <thead><tr><th style="width:210px">Metric</th><th>Definition</th></tr></thead>
       <tbody>
       <tr><td class="nm">Wholesale revenue</td><td>Every HubSpot Order above $0 in the range, dated by the Shopify order date. This is the complete B2B figure — it includes the large private-label draft orders that never pass through web checkout.</td></tr>
-      <tr><td class="nm">Incoming leads</td><td>New accounts created in the range that carry at least one contact. Counted as accounts, not contacts, because Spirit Tea sells to businesses. Company records with no contact, no deal and no order are excluded — the CRM creates those automatically from email domains, and counting them would overstate lead generation.</td></tr>
+      <tr><td class="nm">Incoming leads</td><td>New accounts created in the range with something real behind them — a contact, a deal, or an order. Counted as accounts, not contacts, because Spirit Tea sells to businesses. Only true shells are excluded: company records with no contact, no deal and no order, which the CRM creates automatically from email domains. Note that a contact alone is not required, because the Shopify contact sync skips some buyers and their orders arrive on the company with no contact attached — those are real customers and they count.</td></tr>
       <tr><td class="nm">Inbound vs outbound</td><td>Inbound = the account came to us: a page on our store, organic or social search, a form, or a conversation. Outbound = a rep created it. Two HubSpot fields are read together, because one alone gets it wrong: <b>Original Traffic Source Drill-Down 1</b> says where the first touch came from, <b>Record source</b> says who created the record. A rep who sets a customer up directly in Shopify looks inbound on the first field and outbound on the second — the pair catches it. The split is reported across accounts with an identifiable origin, and the coverage is stated under the chart.</td></tr>
       <tr><td class="nm">Lead-to-close</td><td>Of the accounts created in the range, the share that has since placed a first paid order — measured to today. A short range always reads low, because recent leads have not had time to convert.</td></tr>
       <tr><td class="nm">Median days to close</td><td>Middle value of the gap between account creation and first paid order, for accounts in the range that converted.</td></tr>
