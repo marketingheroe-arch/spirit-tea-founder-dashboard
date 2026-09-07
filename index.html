@@ -272,9 +272,29 @@ const OWNERS = {
 };
 const OTHER = '__other__';
 
-// Inbound / outbound split — Original Traffic Source Drill-Down 1 (companies).
-const INBOUND_TOKENS  = ['shopify','integration','spirittea.co'];
-const OUTBOUND_TOKENS = ['import','extension','crm_ui','presentations','mobile_ios','bcc_to_crm','sales'];
+/* Inbound / outbound. Two properties are needed, not one:
+   · hs_analytics_source_data_1 (Original Traffic Source Drill-Down 1) = where the FIRST TOUCH came from
+   · hs_object_source_label     (Record source)                        = WHO created the record
+   A rep who creates a customer straight in Shopify looks inbound on the first and outbound on the
+   second, so a single signal misfiles them. A bare INTEGRATION with no page and no form is left
+   unattributed on purpose rather than guessed. */
+const PAGE_TOKENS = ['spirittea.co','myshopify.com','spirittea.mom'];
+const MKT_TOKENS  = ['facebook','instagram','unknown keywords','| brand','chatgpt','google','bing',
+                     'linkedin','youtube','tiktok','pinterest','reddit'];
+const OUT_SRC     = ['import','extension','crm_ui','presentations','mobile_ios','bcc_to_crm','meetings.hubspot.com'];
+const OUT_RECORD  = ['CRM_UI','IMPORT','EXTENSION','BCC_TO_CRM','MOBILE_IOS','PRESENTATIONS','DOCUMENTS','CONNECTED_INBOX'];
+const SYNC_ONLY   = ['integration','integrations_sync'];
+
+/** 'in' | 'out' | 'none' — 'none' means we genuinely cannot tell. */
+function classifyLead(c){
+  const v=c.src, rs=(c.recSrc||'').toUpperCase();
+  if(PAGE_TOKENS.some(t=>v.includes(t))) return 'in';   // a real page on our own store
+  if(MKT_TOKENS.some(t=>v.includes(t)))  return 'in';   // organic, social, brand search, AI
+  if(v==='conversations' || rs==='FORM' || rs==='CONVERSATIONS') return 'in';
+  if(OUT_SRC.some(t=>v.includes(t)))     return 'out';
+  if(OUT_RECORD.includes(rs))            return 'out';  // a rep created the record by hand
+  return 'none';                                        // bare sync, or no source at all
+}
 
 // Matcha detection. Applied to the LINE ITEM's own SKU + name, so private-label
 // and archived matcha SKUs are caught, not just what is active in the storefront.
@@ -336,9 +356,35 @@ function bindTips(root){
 const I=t=>`<i class="info" tabindex="0" data-tip="${esc(t)}">i</i>`;
 
 /* ══════════════════════════ API ══════════════════════════ */
-async function hsPost(path,body){
-  const r=await fetch(`${PROXY}?path=${encodeURIComponent(path)}`,{
-    method:'POST',headers:{'x-dashboard-key':PROXY_KEY,'Content-Type':'application/json'},body:JSON.stringify(body)});
+/* HubSpot allows ~190 requests per 10 seconds per token. The product tab fires several
+   hundred batch reads, so every call passes through a gate that spaces request starts
+   out to roughly 16/second, and 429s are retried with exponential back-off. */
+const MIN_GAP_MS = 60;
+let _slot = 0;
+function gate(){
+  const now = Date.now();
+  _slot = Math.max(now, _slot + MIN_GAP_MS);
+  const wait = _slot - now;
+  return wait > 0 ? new Promise(r=>setTimeout(r,wait)) : Promise.resolve();
+}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+async function hsPost(path,body,attempt=0){
+  await gate();
+  let r;
+  try{
+    r=await fetch(`${PROXY}?path=${encodeURIComponent(path)}`,{
+      method:'POST',headers:{'x-dashboard-key':PROXY_KEY,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  }catch(netErr){
+    if(attempt<4){ await sleep(500*Math.pow(2,attempt)); return hsPost(path,body,attempt+1); }
+    throw new Error(`${path} → network error`);
+  }
+  if((r.status===429 || r.status>=500) && attempt<6){
+    const ra=parseFloat(r.headers.get('Retry-After')||'0');
+    const wait = ra>0 ? ra*1000 : Math.min(10000, 500*Math.pow(2,attempt)) + Math.random()*300;
+    await sleep(wait);
+    return hsPost(path,body,attempt+1);
+  }
   if(!r.ok) throw new Error(`${path.split('?')[0]} → HTTP ${r.status}`);
   return r.json();
 }
@@ -370,7 +416,7 @@ async function assocBatch(fromObj,toObj,ids){
       const from=row.from&&row.from.id; if(!from)return;
       map.set(String(from),(row.to||[]).map(t=>String(t.toObjectId)));
     });
-  },10);
+  },6);
   return map;
 }
 async function batchRead(obj,ids,props){
@@ -379,7 +425,7 @@ async function batchRead(obj,ids,props){
   await pool(chunks,async ch=>{
     const r=await hsPost(`/crm/v3/objects/${obj}/batch/read`,{inputs:ch.map(id=>({id:String(id)})),properties:props});
     (r.results||[]).forEach(x=>out.push(x));
-  },10);
+  },6);
   return out;
 }
 
@@ -420,7 +466,7 @@ async function loadCore(){
     filterGroups:[{filters:[{propertyName:'createdate',operator:'HAS_PROPERTY'}]}],
     properties:['name','domain','hubspot_owner_id','segment','enterprise_type','lifecyclestage','createdate',
       'average_order_value_rollup','last_order_date_rollup','first_order_date','hs_analytics_source_data_1',
-      'num_associated_deals','country'],
+      'hs_object_source_label','num_associated_contacts','num_associated_deals','country'],
     sorts:[{propertyName:'createdate',direction:'DESCENDING'}]},6000);
   prog(`${fmtN(companies.length)} accounts. Loading deals…`,1);
 
@@ -479,6 +525,8 @@ function computeCore(){
       lastOrder:p.last_order_date_rollup?Date.parse(p.last_order_date_rollup):null,
       firstOrder:p.first_order_date?Date.parse(p.first_order_date):null,
       src:(p.hs_analytics_source_data_1||'').toLowerCase(),
+      recSrc:p.hs_object_source_label||'',
+      contacts:parseInt(p.num_associated_contacts)||0,
       country:p.country||''
     });
   });
@@ -507,13 +555,17 @@ function computeCore(){
     }
   });
 
-  /* ---- leads (new accounts) in range ---- */
-  const newAccts=[...co.values()].filter(c=>c.created && c.created>=from && c.created<=to);
-  const isOut=c=>OUTBOUND_TOKENS.some(t=>c.src.includes(t));
-  const isIn =c=>INBOUND_TOKENS.some(t=>c.src.includes(t));
-  const inbound=newAccts.filter(isIn).length;
-  const outbound=newAccts.filter(isOut).length;
-  const unknownSrc=newAccts.length-inbound-outbound;
+  /* ---- leads (new accounts) in range ----
+     A company with no contact at all is not a lead: it is a shell the system minted when it
+     linked an email domain. Those are excluded from the lead count instead of inflating it. */
+  const created=[...co.values()].filter(c=>c.created && c.created>=from && c.created<=to);
+  const newAccts=created.filter(c=>c.contacts>0);
+  const shells=created.length-newAccts.length;
+
+  const inbound  = newAccts.filter(c=>classifyLead(c)==='in').length;
+  const outbound = newAccts.filter(c=>classifyLead(c)==='out').length;
+  const attributed = inbound+outbound;
+  const unattributed = newAccts.length-attributed;
 
   const converted=newAccts.filter(c=>c.firstOrder);
   const closeRate=pct(converted.length,newAccts.length);
@@ -530,7 +582,7 @@ function computeCore(){
       && dl.properties.closedate && Date.parse(dl.properties.closedate)>=from && Date.parse(dl.properties.closedate)<=to).length;
     return {key:k,name:ownerName(k),role:k===OTHER?'—':OWNERS[k].role,
       rev:byOwner[k].rev, orders:byOwner[k].orders, accts:byOwner[k].accts.size,
-      leads:mine.length, outbound:mine.filter(isOut).length, closed:conv.length,
+      leads:mine.length, outbound:mine.filter(c=>classifyLead(c)==='out').length, closed:conv.length,
       rate:pct(conv.length,mine.length), med:median(d), wonDeals};
   }).sort((a,b)=>b.rev-a.rev);
 
@@ -546,7 +598,7 @@ function computeCore(){
   const slipping=withLast.filter(c=>{const d=dayDiff(now,c.lastOrder); return d>SLIP_DAYS && d<=CHURN_DAYS;}).sort((a,b)=>b.aov-a.aov);
 
   return {co,revTotal,orderCount,byOwner,byMonth,revByCompany,ordByCompany,
-    newAccts,inbound,outbound,unknownSrc,converted,closeRate,medDays,reps,
+    newAccts,shells,inbound,outbound,attributed,unattributed,converted,closeRate,medDays,reps,
     entCos,entRev,taggedAny,customers,churned,slipping};
 }
 
@@ -668,7 +720,7 @@ function renderOverview(C){
       'Sum of Total Price on every HubSpot Order with a value above $0, dated by the Shopify order date. Wholesale only — the B2C retail store is a separate Shopify and does not reach HubSpot.','hero')}
     ${tile('Incoming leads',fmtN(C.newAccts.length),
       `${fmtN(C.inbound)} inbound · ${fmtN(C.outbound)} outbound`,
-      'New company records created in the selected range. Counted at account level, not contact level, because Spirit Tea sells to businesses. Inbound vs outbound comes from Original Traffic Source Drill-Down 1.')}
+      `New accounts created in the selected range that have at least one contact on them. Counted at account level, not contact level, because Spirit Tea sells to businesses.${C.shells?` ${fmtN(C.shells)} empty company records were created in this range with no contact, no deal and no order — the CRM mints those automatically from email domains, so they are excluded here rather than counted as leads.`:''}`)}
     ${tile('Lead-to-close',fmtPct(C.closeRate),
       C.medDays!=null?`${fmtN(C.medDays)} days median to first order`:'No conversions yet in this cohort',
       'Of the accounts created in this range, the share that has since placed a first paid order — measured to today, not inside the range. A short range will always look low, because those leads have not had time to convert yet.')}
@@ -695,13 +747,15 @@ function renderOverview(C){
         {k:'All other accounts',v:Math.max(0,C.revTotal-C.entRev),color:'var(--s3)'}
       ],C.revTotal)}
       <div style="margin-top:18px">
-        <h2 style="font-size:13px;margin-bottom:2px">Lead sources</h2>
-        <p class="cap" style="margin-bottom:11px">New accounts this range, by how they entered the CRM.</p>
+        <h2 style="font-size:13px;margin-bottom:2px">Inbound vs outbound ${I('Inbound = the account arrived on its own: a page on our store, organic or social search, a form, or a conversation. Outbound = a rep put it into the CRM. The split is shown across the accounts whose origin we can identify; the rest are accounts created straight in Shopify with no page and no form behind them, so their origin is genuinely unknown and is not guessed.')}</h2>
+        <p class="cap" style="margin-bottom:11px">How new accounts reached us.</p>
         ${stackbar([
           {k:'Inbound',v:C.inbound,color:'var(--s3)'},
-          {k:'Outbound',v:C.outbound,color:'var(--s2)'},
-          {k:'Unclassified',v:C.unknownSrc,color:'var(--axis)'}
-        ],C.newAccts.length||1,fmtN)}
+          {k:'Outbound',v:C.outbound,color:'var(--s2)'}
+        ],C.attributed||1,fmtN)}
+        <p class="cap" style="margin:0">Based on ${fmtN(C.attributed)} of ${fmtN(C.newAccts.length)} accounts
+        with an identifiable origin (${fmtPct(pct(C.attributed,C.newAccts.length),0)}).${C.unattributed?`
+        The other ${fmtN(C.unattributed)} were created directly in Shopify, often by a rep, with no record of how the customer arrived.`:''}</p>
       </div>
     </div>
   </div>
@@ -766,7 +820,7 @@ function renderTeam(C){
 
   <div class="grid g2">
     <div class="card">
-      <h2>Outbound leads generated ${I('New accounts created in this range whose Original Traffic Source Drill-Down 1 is an outbound source: import, extension, CRM UI, presentations, mobile, BCC or sales. Inbound is the Shopify store and web entries.')}</h2>
+      <h2>Outbound leads generated ${I('New accounts this rep put into the CRM by hand — created in HubSpot, imported, or added from the browser extension — as opposed to accounts that arrived on their own.')}</h2>
       <p class="cap">Accounts a rep put into the CRM, rather than ones that arrived on their own.</p>
       ${hbar(rows.filter(r=>r.outbound>0).map(r=>({k:r.name,v:r.outbound})),{fmt:fmtN,color:'var(--s2)'})}
     </div>
@@ -903,11 +957,13 @@ function renderDefs(C){
       <thead><tr><th style="width:210px">Metric</th><th>Definition</th></tr></thead>
       <tbody>
       <tr><td class="nm">Wholesale revenue</td><td>Every HubSpot Order above $0 in the range, dated by the Shopify order date. This is the complete B2B figure — it includes the large private-label draft orders that never pass through web checkout.</td></tr>
-      <tr><td class="nm">Incoming leads</td><td>New company records created in the range. Counted as accounts, not contacts, because Spirit Tea sells to businesses and contact counts are inflated by the Shopify sync and B2C newsletter signups.</td></tr>
+      <tr><td class="nm">Incoming leads</td><td>New accounts created in the range that carry at least one contact. Counted as accounts, not contacts, because Spirit Tea sells to businesses. Company records with no contact, no deal and no order are excluded — the CRM creates those automatically from email domains, and counting them would overstate lead generation.</td></tr>
+      <tr><td class="nm">Inbound vs outbound</td><td>Inbound = the account came to us: a page on our store, organic or social search, a form, or a conversation. Outbound = a rep created it. Two HubSpot fields are read together, because one alone gets it wrong: <b>Original Traffic Source Drill-Down 1</b> says where the first touch came from, <b>Record source</b> says who created the record. A rep who sets a customer up directly in Shopify looks inbound on the first field and outbound on the second — the pair catches it. The split is reported across accounts with an identifiable origin, and the coverage is stated under the chart.</td></tr>
       <tr><td class="nm">Lead-to-close</td><td>Of the accounts created in the range, the share that has since placed a first paid order — measured to today. A short range always reads low, because recent leads have not had time to convert.</td></tr>
       <tr><td class="nm">Median days to close</td><td>Middle value of the gap between account creation and first paid order, for accounts in the range that converted.</td></tr>
       <tr><td class="nm">Revenue per rep</td><td>Paid orders credited to the owner of the account the order belongs to. A book-of-business view: reassigning an account moves its history too. Won deals are not used — at Spirit Tea a won deal carries $0 and the money lands on the order.</td></tr>
-      <tr><td class="nm">Outbound leads</td><td>New accounts whose Original Traffic Source Drill-Down 1 is an outbound source (import, extension, CRM UI, presentations, mobile, BCC, sales). Inbound is the Shopify store and web entries.</td></tr>
+      <tr><td class="nm">Outbound leads</td><td>New accounts a rep put into the CRM — created by hand, imported, or added from the browser extension — as opposed to accounts that arrived on their own.</td></tr>
+      <tr><td class="nm">Unknown origin</td><td>Accounts created straight in Shopify with no page and no form behind them. They are real accounts with real contacts, but nothing records how the customer arrived, so they are left out of the inbound/outbound split rather than assigned to a side. This bucket shrinks on its own once reps start orders from a HubSpot deal for the Cin7 rollout.</td></tr>
       <tr><td class="nm">At risk / churned</td><td>Customer accounts with no order in more than ${CHURN_DAYS} days — the definition the team agreed.</td></tr>
       <tr><td class="nm">Slipping</td><td>Customers quiet for ${SLIP_DAYS}–${CHURN_DAYS} days. Not churned yet, so this is where action still changes the outcome.</td></tr>
       <tr><td class="nm">Enterprise</td><td>Accounts tagged Segment = Enterprise, with sub-types Distributor, Private Label and Coffee Chain.</td></tr>
@@ -941,8 +997,17 @@ async function loadProductsIfNeeded(){
     CACHE[ck]=CACHE[ck]||{}; CACHE[ck].products=PRODUCTS;
     renderProducts(window.__C,computeProducts(window.__C));
   }catch(e){
-    $('#p-prod').innerHTML=`<div class="card"><h2>Product detail unavailable</h2>
-      <p class="cap">${esc(e.message)}</p></div>`;
+    $('#p-prod').innerHTML=`<div class="card">
+      <h2>Product detail could not finish loading</h2>
+      <p class="cap">This tab reads every line item in the range, which is tens of thousands of records
+      on a full year, and HubSpot rate-limited the run before it completed.
+      Try again, or pick a shorter range — a quarter always completes.</p>
+      <p class="cap" style="margin-bottom:14px">Technical detail: ${esc(e.message)}</p>
+      <button class="btn" id="prod-retry">Try again</button></div>`;
+    const b=$('#prod-retry'); if(b) b.addEventListener('click',()=>{
+      $('#p-prod').innerHTML='<div class="inline-load">Retrying…</div>';
+      loadProductsIfNeeded();
+    });
   }
 }
 
