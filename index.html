@@ -609,7 +609,7 @@ function computeCore(){
 
 function computeProducts(C){
   const {o2l,items}=PRODUCTS;
-  const bySku=new Map(), byTier=new Map(), matchaByOwner={};
+  const bySku=new Map(), byTier=new Map(), matchaByOwner={}, tierByOwner={};
   let matchaRev=0, matchaPL=0, matchaCat=0, allocTotal=0, noLine=0;
   const matchaByMonth=new Map();
 
@@ -632,7 +632,11 @@ function computeProducts(C){
       const val=l.price*l.qty*f; if(!(val>0))return;
       allocTotal+=val;
       const tier=tierOf(l.sku);
-      if(tier) byTier.set(tier,(byTier.get(tier)||0)+val);
+      if(tier){
+        byTier.set(tier,(byTier.get(tier)||0)+val);
+        if(!tierByOwner[owner]) tierByOwner[owner]={};
+        tierByOwner[owner][tier]=(tierByOwner[owner][tier]||0)+val;
+      }
       if(isMatcha(l.sku,l.name)){
         matchaRev+=val;
         const pl=isPrivateLabel(l.name);
@@ -646,7 +650,7 @@ function computeProducts(C){
     });
   });
   const top=[...bySku.values()].sort((a,b)=>b.rev-a.rev);
-  return {matchaRev,matchaPL,matchaCat,allocTotal,top,byTier,matchaByOwner,matchaByMonth,noLine};
+  return {matchaRev,matchaPL,matchaCat,allocTotal,top,byTier,matchaByOwner,tierByOwner,matchaByMonth,noLine};
 }
 
 /* ══════════════════════════ CHARTS (hand-rolled SVG) ══════════════════════════ */
@@ -696,6 +700,28 @@ function lineChart(series,{h=190,fmt=fmtUSDk}={}){
         data-tip="${esc(p.k)} — ${fmt(p.v)}"/>
       <text x="${x(i)}" y="${h-8}" text-anchor="middle" font-size="11" fill="var(--ink-muted)">${esc(p.k)}</text>`).join('')}
   </svg>`;
+}
+/* tier mix per rep — the three tiers side by side plus the total */
+function tierTable(byOwner){
+  const rows=Object.entries(byOwner).map(([k,t])=>({
+    k:ownerName(k), t1:t.T1||0, t2:t.T2||0, t3:t.T3||0,
+    tot:(t.T1||0)+(t.T2||0)+(t.T3||0)})).filter(r=>r.tot>0).sort((a,b)=>b.tot-a.tot);
+  if(!rows.length) return '<div class="empty">No tiered SKUs sold in this range.</div>';
+  const sw=c=>`<span class="swatch" style="background:${c}"></span>`;
+  return `<div class="tblwrap"><table>
+    <thead><tr><th>Rep</th>
+      <th class="num">${sw('var(--ord-3)')}T1 premium</th>
+      <th class="num">${sw('var(--ord-2)')}T2 mid</th>
+      <th class="num">${sw('var(--ord-1)')}T3 entry</th>
+      <th class="num">Total</th><th class="num">T1 share</th></tr></thead>
+    <tbody>${rows.map(r=>`<tr>
+      <td class="nm">${esc(r.k)}</td>
+      <td class="num">${fmtUSD(r.t1)}</td>
+      <td class="num">${fmtUSD(r.t2)}</td>
+      <td class="num">${fmtUSD(r.t3)}</td>
+      <td class="num nm">${fmtUSD(r.tot)}</td>
+      <td class="num dim">${fmtPct(pct(r.t1,r.tot))}</td>
+    </tr>`).join('')}</tbody></table></div>`;
 }
 function tile(lab,val,sub,tip,cls){
   return `<div class="tile ${cls||''}"><div class="lab">${esc(lab)}${tip?I(tip):''}</div>
@@ -782,7 +808,10 @@ function renderOverview(C){
 }
 
 function renderTeam(C){
-  const rows=C.reps.filter(r=>r.rev>0||r.leads>0||r.accts>0);
+  // Every rep on the roster is listed, even at zero — a rep with no accounts assigned
+  // must be visible as a zero, not silently dropped from the table.
+  const rows=C.reps.filter(r=>r.key!==OTHER || r.rev>0 || r.leads>0);
+  const idle=rows.filter(r=>r.key!==OTHER && r.accts===0 && r.leads===0 && r.rev===0);
   const revRows=rows.filter(r=>r.rev>0).map(r=>({k:r.name,v:r.rev,
     color:r.key===OTHER?'var(--axis)':'var(--ord-3)'}));
   const other=C.reps.find(r=>r.key===OTHER);
@@ -790,6 +819,8 @@ function renderTeam(C){
   $('#p-team').innerHTML=`
   ${other&&other.rev>0?`<div class="note"><b>${fmtUSDk(other.rev)} (${fmtPct(pct(other.rev,C.revTotal))}) sits under "Unassigned / other".</b>
     That is revenue on accounts owned by nobody, by a deactivated user, or by someone outside the sales and CS teams. It is shown rather than hidden because the same owner field feeds commission.</div>`:''}
+  ${idle.length?`<div class="note"><b>${idle.map(r=>esc(r.name)).join(', ')} ${idle.length>1?'have':'has'} no accounts assigned in HubSpot.</b>
+    Every figure on this row is zero because nothing is owned, not because of inactivity — no account ownership means no revenue, no leads and no commission can be attributed.</div>`:''}
 
   <div class="card">
     <h2>Revenue per rep ${I('Revenue is attributed through the account: every paid order is credited to the owner of the company it belongs to. This is a book-of-business view — if an account changes hands, its past revenue moves with it. Deal amounts are not used because won deals at Spirit Tea carry $0; the money always lands on the order.')}</h2>
@@ -799,17 +830,16 @@ function renderTeam(C){
 
   <div class="card">
     <h2>Full team detail</h2>
-    <p class="cap">Sales and Customer Success shown together; roles are marked.</p>
+    <p class="cap">The full roster, including anyone currently sitting at zero.</p>
     <div class="tblwrap"><table>
       <thead><tr>
-        <th>Rep</th><th>Role</th>
+        <th>Rep</th>
         <th class="num">Revenue</th><th class="num">Orders</th><th class="num">Accounts</th>
         <th class="num">New leads</th><th class="num">Outbound</th><th class="num">Closed</th>
         <th class="num">Close rate</th><th class="num">Median days</th><th class="num">Deals won</th>
       </tr></thead>
       <tbody>${rows.map(r=>`<tr>
         <td class="nm">${esc(r.name)}</td>
-        <td><span class="pill ${r.role==='Sales'?'sales':r.role==='CS'?'cs':'none'}">${esc(r.role)}</span></td>
         <td class="num nm">${fmtUSD(r.rev)}</td>
         <td class="num dim">${fmtN(r.orders)}</td>
         <td class="num dim">${fmtN(r.accts)}</td>
@@ -920,16 +950,21 @@ function renderProducts(C,P){
         <p class="cap" style="margin-bottom:8px">Private-label orders are large and irregular, so this line is lumpy by nature.</p>
         ${lineChart(mm)}
       </div>
+      <div style="margin-top:20px">
+        <h2 style="font-size:13px;margin-bottom:2px">Matcha revenue by rep</h2>
+        <p class="cap" style="margin-bottom:11px">Credited through the account owner, same as all revenue here.</p>
+        ${hbar(Object.entries(P.matchaByOwner).map(([k,v])=>({k:ownerName(k),v,
+          color:k===OTHER?'var(--axis)':'var(--s4)'})).sort((a,b)=>b.v-a.v))}
+      </div>
     </div>
     <div class="card">
       <h2>Product tier mix ${I('Tier is read from the SKU, which encodes it as tier1 / tier2 / tier3. Tier reflects the quality and cost of the leaf Spirit Tea buys, not the size of the customer. Lines whose SKU carries no tier are excluded.')}</h2>
       <p class="cap">Revenue by leaf tier — the "finesse versus volume" view.</p>
       ${stackbar(tiers,tierTotal)}
       <div style="margin-top:20px">
-        <h2 style="font-size:13px;margin-bottom:2px">Matcha revenue by rep</h2>
-        <p class="cap" style="margin-bottom:11px">Credited through the account owner, same as all revenue here.</p>
-        ${hbar(Object.entries(P.matchaByOwner).map(([k,v])=>({k:ownerName(k),v,
-          color:k===OTHER?'var(--axis)':'var(--ord-3)'})).sort((a,b)=>b.v-a.v))}
+        <h2 style="font-size:13px;margin-bottom:2px">Tier mix by rep ${I('The same three tiers, broken out for each rep, so it is visible who is selling premium leaf and who is moving volume. T1 share is that rep\'s premium revenue as a percentage of their own tiered revenue — the "finesse" number.')}</h2>
+        <p class="cap" style="margin-bottom:11px">Who sells premium leaf and who moves volume.</p>
+        ${tierTable(P.tierByOwner)}
       </div>
     </div>
   </div>
@@ -966,14 +1001,14 @@ function renderDefs(C){
       <tr><td class="nm">Inbound vs outbound</td><td>Inbound = the account came to us: a page on our store, organic or social search, a form, or a conversation. Outbound = a rep created it. Two HubSpot fields are read together, because one alone gets it wrong: <b>Original Traffic Source Drill-Down 1</b> says where the first touch came from, <b>Record source</b> says who created the record. A rep who sets a customer up directly in Shopify looks inbound on the first field and outbound on the second — the pair catches it. The split is reported across accounts with an identifiable origin, and the coverage is stated under the chart.</td></tr>
       <tr><td class="nm">Lead-to-close</td><td>Of the accounts created in the range, the share that has since placed a first paid order — measured to today. A short range always reads low, because recent leads have not had time to convert.</td></tr>
       <tr><td class="nm">Median days to close</td><td>Middle value of the gap between account creation and first paid order, for accounts in the range that converted.</td></tr>
-      <tr><td class="nm">Revenue per rep</td><td>Paid orders credited to the owner of the account the order belongs to. A book-of-business view: reassigning an account moves its history too. Won deals are not used — at Spirit Tea a won deal carries $0 and the money lands on the order.</td></tr>
+      <tr><td class="nm">Revenue per rep</td><td>Paid orders credited to the owner of the account the order belongs to. A book-of-business view: reassigning an account moves its history too. Won deals are not used — at Spirit Tea a won deal carries $0 and the money lands on the order. A rep with no accounts assigned shows zero everywhere; that is an ownership gap, not inactivity.</td></tr>
       <tr><td class="nm">Outbound leads</td><td>New accounts a rep put into the CRM — created by hand, imported, or added from the browser extension — as opposed to accounts that arrived on their own.</td></tr>
       <tr><td class="nm">Unknown origin</td><td>Accounts created straight in Shopify with no page and no form behind them. They are real accounts with real contacts, but nothing records how the customer arrived, so they are left out of the inbound/outbound split rather than assigned to a side. This bucket shrinks on its own once reps start orders from a HubSpot deal for the Cin7 rollout.</td></tr>
       <tr><td class="nm">At risk / churned</td><td>Customer accounts with no order in more than ${CHURN_DAYS} days — the definition the team agreed.</td></tr>
       <tr><td class="nm">Slipping</td><td>Customers quiet for ${SLIP_DAYS}–${CHURN_DAYS} days. Not churned yet, so this is where action still changes the outcome.</td></tr>
       <tr><td class="nm">Enterprise</td><td>Accounts tagged Segment = Enterprise, with sub-types Distributor, Private Label and Coffee Chain.</td></tr>
       <tr><td class="nm">Matcha revenue</td><td>All matcha line items, matched on the SKU so private-label and archived matcha count too, with order-level discounts spread across lines so the total reconciles to revenue.</td></tr>
-      <tr><td class="nm">Product tier</td><td>T1/T2/T3 read from the SKU. Tier describes the leaf Spirit Tea buys — quality, availability and cost — not the size of the customer.</td></tr>
+      <tr><td class="nm">Product tier</td><td>T1/T2/T3 read from the SKU. Tier describes the leaf Spirit Tea buys — quality, availability and cost — not the size of the customer. Broken out per rep so premium selling is visible next to volume selling.</td></tr>
       </tbody>
     </table></div>
   </div>
