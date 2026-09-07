@@ -261,6 +261,10 @@ const ENTERPRISE_VALUE = 'Distributor';
 const CHURN_DAYS = 365;      // no order in > 1 year  = churned
 const SLIP_DAYS  = 90;       // 90–365 days           = slipping
 
+/* Spirit Tea assigns every account twice — a Sales owner who wins it
+   (hubspot_owner_id) and a Customer Success owner who keeps it
+   (cs_company_owner). `role` decides which section of the Team tab a
+   person is reported in; it is not shown as a label anywhere. */
 const OWNERS = {
   '80988946' :{name:'Will Frith',      role:'Sales'},
   '312248717':{name:'Daniel Mendoza',  role:'Sales'},
@@ -466,7 +470,7 @@ async function loadCore(){
     filterGroups:[{filters:[{propertyName:'createdate',operator:'HAS_PROPERTY'}]}],
     properties:['name','domain','hubspot_owner_id','segment','enterprise_type','lifecyclestage','createdate',
       'average_order_value_rollup','last_order_date_rollup','first_order_date','hs_analytics_source_data_1',
-      'hs_object_source_label','num_associated_contacts','num_associated_deals','country'],
+      'hs_object_source_label','num_associated_contacts','num_associated_deals','cs_company_owner','country'],
     sorts:[{propertyName:'createdate',direction:'DESCENDING'}]},6000);
   prog(`${fmtN(companies.length)} accounts. Loading deals…`,1);
 
@@ -528,6 +532,10 @@ function computeCore(){
       recSrc:p.hs_object_source_label||'',
       contacts:parseInt(p.num_associated_contacts)||0,
       deals:parseInt(p.num_associated_deals)||0,
+      // Spirit Tea runs two owner fields: Sales owns pre-customer accounts in
+      // hubspot_owner_id, Customer Success owns customers in cs_company_owner.
+      csRaw:p.cs_company_owner||'',
+      csOwner:ownerKey(p.cs_company_owner),
       country:p.country||''
     });
   });
@@ -577,7 +585,7 @@ function computeCore(){
   const daysToClose=converted.map(c=>dayDiff(c.firstOrder,c.created)).filter(d=>d>=0);
   const medDays=median(daysToClose);
 
-  /* ---- per rep ---- */
+  /* ---- per rep (Sales) ---- */
   const reps=Object.keys(OWNERS).concat([OTHER]).map(k=>{
     const mine=newAccts.filter(c=>c.owner===k);
     const conv=mine.filter(c=>c.firstOrder);
@@ -602,9 +610,27 @@ function computeCore(){
   const churned=withLast.filter(c=>dayDiff(now,c.lastOrder)>CHURN_DAYS).sort((a,b)=>b.aov-a.aov);
   const slipping=withLast.filter(c=>{const d=dayDiff(now,c.lastOrder); return d>SLIP_DAYS && d<=CHURN_DAYS;}).sort((a,b)=>b.aov-a.aov);
 
+  /* ---- Customer Success book ----
+     A different job from selling, measured on a different field. Revenue here overlaps
+     with the sales view on purpose: the same account has a Sales owner who won it and a
+     CS owner who keeps it. These two numbers must never be added together. */
+  const cs={};
+  Object.keys(OWNERS).concat([OTHER]).forEach(k=>cs[k]={accts:0,rev:0,active:0,slip:0,churn:0});
+  [...co.values()].forEach(c=>{
+    if(!c.csRaw) return;
+    const k=c.csOwner; if(!cs[k]) return;
+    cs[k].accts++;
+    const r=revByCompany.get(c.id)||0;
+    cs[k].rev+=r; if(r>0) cs[k].active++;
+  });
+  slipping.forEach(c=>{ if(c.csRaw && cs[c.csOwner]) cs[c.csOwner].slip++; });
+  churned.forEach(c=>{ if(c.csRaw && cs[c.csOwner]) cs[c.csOwner].churn++; });
+  const csRows=Object.keys(cs).filter(k=>cs[k].accts>0)
+    .map(k=>({key:k,name:ownerName(k),...cs[k]})).sort((a,b)=>b.accts-a.accts);
+
   return {co,revTotal,orderCount,byOwner,byMonth,revByCompany,ordByCompany,
     newAccts,shells,inbound,outbound,attributed,unattributed,converted,closeRate,medDays,reps,
-    entCos,entRev,taggedAny,customers,churned,slipping};
+    entCos,entRev,taggedAny,customers,churned,slipping,csRows};
 }
 
 function computeProducts(C){
@@ -808,29 +834,39 @@ function renderOverview(C){
 }
 
 function renderTeam(C){
-  // Every rep on the roster is listed, even at zero — a rep with no accounts assigned
-  // must be visible as a zero, not silently dropped from the table.
-  const rows=C.reps.filter(r=>r.key!==OTHER || r.rev>0 || r.leads>0);
-  const idle=rows.filter(r=>r.key!==OTHER && r.accts===0 && r.leads===0 && r.rev===0);
+  // Two different jobs, measured on two different owner fields, so two sections.
+  // Sales own pre-customer accounts (hubspot_owner_id); Customer Success own
+  // customers (cs_company_owner). Putting them in one list makes a CS rep look
+  // like a sales rep with no revenue, which is a category error, not a fact.
+  const rows=C.reps.filter(r=>(r.key!==OTHER && OWNERS[r.key] && OWNERS[r.key].role==='Sales')
+                              || (r.key===OTHER && (r.rev>0||r.leads>0)));
   const revRows=rows.filter(r=>r.rev>0).map(r=>({k:r.name,v:r.rev,
     color:r.key===OTHER?'var(--axis)':'var(--ord-3)'}));
   const other=C.reps.find(r=>r.key===OTHER);
+  const cs=C.csRows||[];
 
   $('#p-team').innerHTML=`
+  <div class="note note-info"><b>Two jobs, measured separately.</b>
+    Spirit Tea assigns every account twice: a <b>Sales</b> owner who wins it, and a <b>Customer Success</b>
+    owner who looks after it once it is a customer. They are different fields in HubSpot and different work,
+    so they are reported below in two sections rather than one league table.
+    The same revenue appears in both — once as "who won this account", once as "whose book it sits in".
+    <b>Do not add the two together.</b></div>
+
   ${other&&other.rev>0?`<div class="note"><b>${fmtUSDk(other.rev)} (${fmtPct(pct(other.rev,C.revTotal))}) sits under "Unassigned / other".</b>
-    That is revenue on accounts owned by nobody, by a deactivated user, or by someone outside the sales and CS teams. It is shown rather than hidden because the same owner field feeds commission.</div>`:''}
-  ${idle.length?`<div class="note"><b>${idle.map(r=>esc(r.name)).join(', ')} ${idle.length>1?'have':'has'} no accounts assigned in HubSpot.</b>
-    Every figure on this row is zero because nothing is owned, not because of inactivity — no account ownership means no revenue, no leads and no commission can be attributed.</div>`:''}
+    Revenue on accounts with no Sales owner — nobody, a deactivated user, or someone outside the two teams. It is shown rather than hidden because the same field feeds commission.</div>`:''}
+
+  <h2 style="font-size:15px;margin:22px 0 10px">Sales — new business</h2>
 
   <div class="card">
-    <h2>Revenue per rep ${I('Revenue is attributed through the account: every paid order is credited to the owner of the company it belongs to. This is a book-of-business view — if an account changes hands, its past revenue moves with it. Deal amounts are not used because won deals at Spirit Tea carry $0; the money always lands on the order.')}</h2>
-    <p class="cap">Paid orders in this range, credited to the account owner.</p>
+    <h2>Revenue per rep ${I('Revenue is attributed through the account: every paid order is credited to the SALES owner of the company it belongs to. A book-of-business view — if an account changes hands, its past revenue moves with it. Deal amounts are not used because won deals at Spirit Tea carry $0; the money always lands on the order.')}</h2>
+    <p class="cap">Paid orders in this range, credited to the Sales owner of the account.</p>
     ${hbar(revRows)}
   </div>
 
   <div class="card">
-    <h2>Full team detail</h2>
-    <p class="cap">The full roster, including anyone currently sitting at zero.</p>
+    <h2>Sales detail</h2>
+    <p class="cap">Winning new business: what came in, what closed, and how long it took.</p>
     <div class="tblwrap"><table>
       <thead><tr>
         <th>Rep</th>
@@ -864,7 +900,47 @@ function renderTeam(C){
       <p class="cap">New accounts that went on to place a first paid order.</p>
       ${hbar(rows.filter(r=>r.closed>0).map(r=>({k:r.name,v:r.closed})),{fmt:fmtN,color:'var(--s3)'})}
     </div>
-  </div>`;
+  </div>
+
+  <h2 style="font-size:15px;margin:26px 0 10px">Customer Success — the book</h2>
+
+  ${cs.length?`
+  <div class="card">
+    <h2>Accounts kept alive ${I('Accounts where this person is the Customer Success owner. Ordering this range = the account placed at least one paid order inside the selected range. Slipping and churned are that person\'s own book, on the same 90-day and 365-day definitions used on the Accounts tab.')}</h2>
+    <p class="cap">Retention, not acquisition — the half of the business the sales table cannot show.</p>
+    <div class="tblwrap"><table>
+      <thead><tr>
+        <th>Owner</th>
+        <th class="num">Accounts managed</th><th class="num">Ordering this range</th><th class="num">Still ordering</th>
+        <th class="num">Revenue in book</th><th class="num">Slipping</th><th class="num">Churned</th>
+      </tr></thead>
+      <tbody>${cs.map(r=>`<tr>
+        <td class="nm">${esc(r.name)}</td>
+        <td class="num nm">${fmtN(r.accts)}</td>
+        <td class="num">${fmtN(r.active)}</td>
+        <td class="num">${fmtPct(pct(r.active,r.accts))}</td>
+        <td class="num nm">${fmtUSD(r.rev)}</td>
+        <td class="num dim">${fmtN(r.slip)}</td>
+        <td class="num dim">${fmtN(r.churn)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <p class="cap" style="margin:12px 0 0">Revenue here is the same money as the sales table seen from the other side:
+    the sales figure says who won the account, this one says whose book it sits in today. Adding them would double-count.</p>
+  </div>
+
+  <div class="grid g2">
+    <div class="card">
+      <h2>Book size</h2>
+      <p class="cap">Customer accounts under each person's care.</p>
+      ${hbar(cs.map(r=>({k:r.name,v:r.accts})),{fmt:fmtN,color:'var(--s3)'})}
+    </div>
+    <div class="card">
+      <h2>Accounts gone quiet ${I('Slipping (90–365 days without an order) plus churned (over 365 days), counted on each CS owner\'s book. This is a workload to aim retention work at, not a scorecard — accounts go quiet for reasons nobody controls.')}</h2>
+      <p class="cap">Slipping plus churned, per book. A rescue list, not a scorecard.</p>
+      ${hbar(cs.map(r=>({k:r.name,v:r.slip+r.churn})),{fmt:fmtN,color:'var(--s2)'})}
+    </div>
+  </div>`
+  :'<div class="card"><div class="empty">No accounts carry a Customer Success owner in this portal.</div></div>'}`;
 }
 
 function renderAccounts(C){
@@ -997,11 +1073,13 @@ function renderDefs(C){
       <thead><tr><th style="width:210px">Metric</th><th>Definition</th></tr></thead>
       <tbody>
       <tr><td class="nm">Wholesale revenue</td><td>Every HubSpot Order above $0 in the range, dated by the Shopify order date. This is the complete B2B figure — it includes the large private-label draft orders that never pass through web checkout.</td></tr>
+      <tr><td class="nm">The two owner fields</td><td>Every account is assigned twice. <b>Sales owner</b> is who wins it; <b>Customer Success owner</b> is who looks after it once it is a customer. They are separate fields in HubSpot, so the Team tab reports them as two sections. A CS rep showing no sales revenue is doing a different job, not underperforming. The same revenue appears in both views — once as "who won this", once as "whose book this is" — so the two must never be added together.</td></tr>
       <tr><td class="nm">Incoming leads</td><td>New accounts created in the range with something real behind them — a contact, a deal, or an order. Counted as accounts, not contacts, because Spirit Tea sells to businesses. Only true shells are excluded: company records with no contact, no deal and no order, which the CRM creates automatically from email domains. Note that a contact alone is not required, because the Shopify contact sync skips some buyers and their orders arrive on the company with no contact attached — those are real customers and they count.</td></tr>
       <tr><td class="nm">Inbound vs outbound</td><td>Inbound = the account came to us: a page on our store, organic or social search, a form, or a conversation. Outbound = a rep created it. Two HubSpot fields are read together, because one alone gets it wrong: <b>Original Traffic Source Drill-Down 1</b> says where the first touch came from, <b>Record source</b> says who created the record. A rep who sets a customer up directly in Shopify looks inbound on the first field and outbound on the second — the pair catches it. The split is reported across accounts with an identifiable origin, and the coverage is stated under the chart.</td></tr>
       <tr><td class="nm">Lead-to-close</td><td>Of the accounts created in the range, the share that has since placed a first paid order — measured to today. A short range always reads low, because recent leads have not had time to convert.</td></tr>
       <tr><td class="nm">Median days to close</td><td>Middle value of the gap between account creation and first paid order, for accounts in the range that converted.</td></tr>
-      <tr><td class="nm">Revenue per rep</td><td>Paid orders credited to the owner of the account the order belongs to. A book-of-business view: reassigning an account moves its history too. Won deals are not used — at Spirit Tea a won deal carries $0 and the money lands on the order. A rep with no accounts assigned shows zero everywhere; that is an ownership gap, not inactivity.</td></tr>
+      <tr><td class="nm">Revenue per rep</td><td>Paid orders credited to the <b>Sales</b> owner of the account the order belongs to. A book-of-business view: reassigning an account moves its history too. Won deals are not used — at Spirit Tea a won deal carries $0 and the money lands on the order.</td></tr>
+      <tr><td class="nm">Accounts kept alive</td><td>The Customer Success view: accounts under each CS owner, how many are still ordering in the range, and how many have gone slipping or churned on that book. This is retention work, and it is the half of the business the sales table cannot show.</td></tr>
       <tr><td class="nm">Outbound leads</td><td>New accounts a rep put into the CRM — created by hand, imported, or added from the browser extension — as opposed to accounts that arrived on their own.</td></tr>
       <tr><td class="nm">Unknown origin</td><td>Accounts created straight in Shopify with no page and no form behind them. They are real accounts with real contacts, but nothing records how the customer arrived, so they are left out of the inbound/outbound split rather than assigned to a side. This bucket shrinks on its own once reps start orders from a HubSpot deal for the Cin7 rollout.</td></tr>
       <tr><td class="nm">At risk / churned</td><td>Customer accounts with no order in more than ${CHURN_DAYS} days — the definition the team agreed.</td></tr>
