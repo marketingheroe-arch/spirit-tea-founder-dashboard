@@ -345,7 +345,7 @@ function isPrivateLabel(name){ const n=(name||'').toLowerCase(); return PL_HINTS
 
 /* ══════════════════════════ STATE ══════════════════════════ */
 let RANGE={from:null,to:null,key:'ytd'};
-let CORE=null, PRODUCTS=null;
+let CORE=null, PRODUCTS=null, PRODUCTS_PREV=null;
 const CACHE={};             // rangeKey -> {core, products}
 
 /* ══════════════════════════ UTIL ══════════════════════════ */
@@ -573,9 +573,8 @@ async function loadCore(){
 }
 
 /* ══════════════════════════ LOAD — PRODUCTS (lazy) ══════════════════════════ */
-async function loadProducts(){
-  const orders=CORE.orders;
-  prog('Linking line items…',0,3);
+async function loadProducts(orders,label){
+  prog(`Linking line items${label?' — '+label:''}…`,0,3);
   const o2l=await assocBatch('0-123','line_items',orders.map(o=>o.id));
   const ids=[...new Set([].concat(...[...o2l.values()]))];
   prog(`${fmtN(ids.length)} line items. Reading…`,1,3);
@@ -783,13 +782,15 @@ function csBookByMonth(C){
     k:new Date(k+'-02').toLocaleDateString('en-US',{month:'short'}),v:s.size}));
 }
 
-function computeProducts(C){
-  const {o2l,items}=PRODUCTS;
+/* Runs over whichever set of orders and line items it is given, so the comparison
+   period goes through exactly the same discount proration and matcha matching. */
+function computeProducts(C,PR,orders,o2c){
+  const {o2l,items}=PR;
   const bySku=new Map(), byTier=new Map(), matchaByOwner={}, tierByOwner={};
   let matchaRev=0, matchaPL=0, matchaCat=0, allocTotal=0, noLine=0;
   const matchaByMonth=new Map();
 
-  CORE.orders.forEach(o=>{
+  orders.forEach(o=>{
     const total=parseFloat(o.properties.hs_total_price)||0; if(total<=0)return;
     const t=Date.parse(o.properties.hs_external_created_date);
     const lids=o2l.get(String(o.id))||[];
@@ -801,7 +802,7 @@ function computeProducts(C){
     // pro-rata so product revenue reconciles to the order total.
     let f = gross>0 ? total/gross : 1;
     if(!isFinite(f) || f<0) f=1; if(f>2) f=2;
-    const cid=(C && (CORE.o2c.get(String(o.id))||[])[0])||null;
+    const cid=(C && (o2c.get(String(o.id))||[])[0])||null;
     const owner=cid&&C.co.get(cid)?C.co.get(cid).owner:OTHER;
 
     lines.forEach(l=>{
@@ -1068,6 +1069,29 @@ function renderTeam(C){
 
   <h2 style="font-size:15px;margin:22px 0 10px">Sales — new business</h2>
 
+  ${(()=>{const sk=rows.map(r=>r.key);
+    const sum=(f)=>sk.reduce((s,k)=>s+f(k),0);
+    const rev =sum(k=>(C.byOwner[k]||{rev:0}).rev);
+    const pRev=P?sum(k=>(P.ord.byOwner[k]||{rev:0}).rev):null;
+    const leads=rows.reduce((s,r)=>s+r.leads,0);
+    const closed=rows.reduce((s,r)=>s+r.closed,0);
+    const outb=rows.reduce((s,r)=>s+r.outbound,0);
+    const pCoh=P?P.coh:null;
+    return `<div class="grid g4" style="margin-bottom:16px">
+    ${tile('Revenue, sales-owned',fmtUSD(rev),
+      `${delta(rev,pRev,{fmt:fmtUSD,what:'Sales-owned revenue in the previous period'})} across the sales team`,
+      'Paid orders in the range credited to the Sales owner of the account, added up across everyone in this section. It is not the company total — revenue on accounts with no Sales owner sits outside it.','hero')}
+    ${tile('New leads',fmtN(leads),
+      `${delta(leads,pCoh&&pCoh.newAccts.length,{what:'New accounts in the previous period'})} new accounts owned by sales`,
+      'New accounts created in the range that belong to someone in this section. The comparison counts the same thing over the earlier window.')}
+    ${tile('Outbound generated',fmtN(outb),
+      `${delta(outb,pCoh&&pCoh.outbound,{what:'Outbound accounts in the previous period'})} put into the CRM by a rep`,
+      'Accounts a rep created by hand, imported, or added from the browser extension, rather than accounts that arrived on their own.')}
+    ${tile('Leads closed',fmtN(closed),
+      `${delta(closed,pCoh&&pCoh.converted.length,{what:'Leads closed from the previous cohort'})} placed a first order`,
+      'Accounts created in the range that have since placed a first paid order. Both periods are measured to today, so the earlier cohort has had longer to convert and will usually read higher — a fall here is normal, not a warning.')}
+  </div>`;})()}
+
   <div class="card">
     <h2>Revenue per rep ${I('Revenue is attributed through the account: every paid order is credited to the SALES owner of the company it belongs to. A book-of-business view — if an account changes hands, its past revenue moves with it. Deal amounts are not used because won deals at Spirit Tea carry $0; the money always lands on the order.')}</h2>
     <p class="cap">Paid orders in this range, credited to the Sales owner of the account.</p>
@@ -1230,8 +1254,12 @@ function renderTeam(C){
 }
 
 function renderAccounts(C){
-  const entRows=C.entCos.map(c=>({c,rev:C.revByCompany.get(c.id)||0,ord:C.ordByCompany.get(c.id)||0}))
-    .sort((a,b)=>b.rev-a.rev);
+  const P=C.prev;
+  const prevRev=P?P.ord.byCompany:null;
+  const entRows=C.entCos.map(c=>({c,rev:C.revByCompany.get(c.id)||0,ord:C.ordByCompany.get(c.id)||0,
+    prev:prevRev?(prevRev.get(c.id)||0):null})).sort((a,b)=>b.rev-a.rev);
+  const entActive=entRows.filter(r=>r.rev>0).length;
+  const entActivePrev=P?C.entCos.filter(c=>(prevRev.get(c.id)||0)>0).length:null;
   const riskTable=(list,title,cap,tip)=>`
     <div class="card">
       <h2>${title} ${I(tip)}</h2>
@@ -1250,20 +1278,38 @@ function renderAccounts(C){
     </div>`;
 
   $('#p-acct').innerHTML=`
+  <div class="grid g3" style="margin-bottom:16px">
+    ${tile('Enterprise revenue',fmtUSD(C.entRev),
+      `${delta(C.entRev,P&&P.entRev,{fmt:fmtUSD,what:'Enterprise revenue in the previous period'})} ${fmtPct(pct(C.entRev,C.revTotal))} of wholesale revenue`,
+      'Paid orders in this range from accounts tagged Segment = Enterprise. Only tagged accounts count, so treat it as a floor rather than the true Enterprise number.','hero')}
+    ${tile('Enterprise accounts ordering',fmtN(entActive),
+      `${delta(entActive,entActivePrev,{what:'Enterprise accounts ordering in the previous period'})} of ${fmtN(C.entCos.length)} tagged`,
+      'Tagged Enterprise accounts that placed at least one paid order inside the range. A fall here with revenue holding means the Enterprise revenue is concentrating into fewer accounts.')}
+    ${tile('Average per Enterprise account',fmtUSD(entActive?C.entRev/entActive:0),
+      `${delta(entActive?C.entRev/entActive:0,(P&&entActivePrev)?P.entRev/entActivePrev:null,{fmt:fmtUSD,what:'Average per ordering Enterprise account in the previous period'})} among those that ordered`,
+      'Enterprise revenue divided by the Enterprise accounts that actually ordered in the range — not by every tagged account, which would understate it.')}
+  </div>
+
   <div class="card">
     <h2>Enterprise accounts ${I('Accounts tagged Segment = Enterprise in HubSpot. Revenue is their paid orders inside the selected range. Only tagged accounts appear — untagged Enterprise accounts are invisible here and make the total a floor.')}</h2>
-    <p class="cap">${fmtN(C.entCos.length)} tagged accounts · ${fmtUSD(C.entRev)} in this range · ${fmtPct(pct(C.entRev,C.revTotal))} of wholesale revenue.</p>
+    <p class="cap">${fmtN(C.entCos.length)} tagged accounts · ${fmtUSD(C.entRev)} in this range · ${fmtPct(pct(C.entRev,C.revTotal))} of wholesale revenue.${P?` The change column compares each account against ${esc(P.label)}.`:''}</p>
     ${entRows.length?`<div class="tblwrap"><table>
-      <thead><tr><th>Account</th><th>Type</th><th>Owner</th><th class="num">Revenue</th><th class="num">Orders</th><th class="num">Avg order value</th></tr></thead>
+      <thead><tr><th>Account</th><th>Type</th><th>Owner</th><th class="num">Revenue</th>${P?'<th class="num">vs prev</th>':''}<th class="num">Orders</th><th class="num">Avg order value</th></tr></thead>
       <tbody>${entRows.map(r=>`<tr>
         <td class="nm"><a href="${HS_CO}${r.c.id}" target="_blank" rel="noopener">${esc(r.c.name)}</a></td>
         <td>${r.c.entType?`<span class="pill ent">${esc(r.c.entType)}</span>`:'<span class="pill none">Not set</span>'}</td>
         <td class="dim">${esc(ownerName(r.c.owner))}</td>
         <td class="num nm">${fmtUSD(r.rev)}</td>
+        ${P?`<td class="num">${delta(r.rev,r.prev,{fmt:fmtUSD,what:esc(r.c.name)+' in the previous period'})}</td>`:''}
         <td class="num dim">${fmtN(r.ord)}</td>
         <td class="num dim">${fmtUSD(r.c.aov)}</td>
       </tr>`).join('')}</tbody></table></div>`:'<div class="empty">No Enterprise-tagged accounts found.</div>'}
   </div>
+
+  <div class="note note-info">The two lists below carry no change badges on purpose.
+    Slipping and churned are measured from <b>today</b> back to each account's last order, not from inside the
+    selected range, so they do not belong to a period and cannot honestly be compared against one.
+    They are a standing worklist, not a period figure.</div>
 
   ${riskTable(C.slipping,'Slipping accounts','Customers who have gone quiet but have not churned yet. This is the actionable list.',
     `Customers whose last order is ${SLIP_DAYS}–${CHURN_DAYS} days ago. Ranked by their typical order value, so the biggest accounts surface first.`)}
@@ -1272,13 +1318,21 @@ function renderAccounts(C){
     `Customers whose last order is more than ${CHURN_DAYS} days ago — the churn definition the team agreed. Ranked by typical order value.`)}`;
 }
 
-function renderProducts(C,P){
+function renderProducts(C,P,Q,pending){
   const mPct=pct(P.matchaRev,P.allocTotal);
+  const qPct=Q?pct(Q.matchaRev,Q.allocTotal):null;
+  /* d() is delta() with the comparison switched off while the earlier period is still
+     loading, and switched off for good if it never arrives. */
+  const d=(cur,prev,o)=>Q?delta(cur,prev,o):(pending
+    ?'<span class="dlt na" data-tip="The comparison period is still loading for this tab. It reads every line item twice, so it takes a moment longer than the others.">comparing…</span>'
+    :(PV?'<span class="dlt na" data-tip="The comparison period could not be loaded for this tab. Product figures read every line item in the range, which is the heaviest request this dashboard makes, and HubSpot rate-limited it. The numbers on this tab are correct — only the change badges are missing. A shorter range will usually bring them back.">no comparison</span>'
+        :delta(cur,prev,o)));
   const tiers=[['T1','var(--ord-3)'],['T2','var(--ord-2)'],['T3','var(--ord-1)']]
     .map(([t,c])=>({k:t+' — '+(t==='T1'?'premium':t==='T2'?'mid':'entry'),v:P.byTier.get(t)||0,color:c}));
   const tierTotal=tiers.reduce((s,t)=>s+t.v,0);
   const mm=[...P.matchaByMonth.entries()].sort().map(([k,v])=>({
     k:new Date(k+'-02').toLocaleDateString('en-US',{month:'short'}),v}));
+  const qSku=new Map(); if(Q) Q.top.forEach(r=>qSku.set(r.sku||r.name,r.rev));
 
   $('#p-prod').innerHTML=`
   <div class="note note-info"><b>How product revenue is calculated.</b>
@@ -1288,20 +1342,25 @@ function renderProducts(C,P){
     ${P.noLine?`${fmtN(P.noLine)} orders had no line items and are excluded from this tab only.`:''}</div>
 
   <div class="grid g4" style="margin-bottom:16px">
-    ${tile('Matcha revenue',fmtUSD(P.matchaRev),`${fmtPct(mPct)} of wholesale revenue`,
+    ${tile('Matcha revenue',fmtUSD(P.matchaRev),
+      `${d(P.matchaRev,Q&&Q.matchaRev,{fmt:fmtUSD,what:'Matcha revenue in the previous period'})} ${fmtPct(mPct)} of wholesale revenue`,
       'Revenue from every matcha line item in the range, after spreading order-level discounts across the lines.','hero')}
-    ${tile('Private-label matcha',fmtUSD(P.matchaPL),`${fmtPct(pct(P.matchaPL,P.matchaRev||1))} of matcha`,
-      'Matcha packaged under a customer’s own brand — Verve, Harmony Leaf, Alfred’s and similar. These SKUs are hidden from the storefront, which is why a storefront-only view misses most matcha revenue.')}
-    ${tile('Catalogue matcha',fmtUSD(P.matchaCat),`${fmtPct(pct(P.matchaCat,P.matchaRev||1))} of matcha`,
-      'Matcha sold under the Spirit Tea catalogue rather than a customer brand.')}
-    ${tile('Matcha SKUs sold',fmtN(P.top.length),'Distinct matcha SKUs with revenue',
-      'Number of distinct matcha SKUs that generated revenue in this range.')}
+    ${tile('Private-label matcha',fmtUSD(P.matchaPL),
+      `${d(P.matchaPL,Q&&Q.matchaPL,{fmt:fmtUSD,what:'Private-label matcha in the previous period'})} ${fmtPct(pct(P.matchaPL,P.matchaRev||1))} of matcha`,
+      'Matcha packaged under a customer’s own brand — Verve, Harmony Leaf, Alfred’s and similar. These SKUs are hidden from the storefront, which is why a storefront-only view misses most matcha revenue. Private-label orders are large and irregular, so this figure swings hard between periods — read the direction, not the size of the swing.')}
+    ${tile('Catalogue matcha',fmtUSD(P.matchaCat),
+      `${d(P.matchaCat,Q&&Q.matchaCat,{fmt:fmtUSD,what:'Catalogue matcha in the previous period'})} ${fmtPct(pct(P.matchaCat,P.matchaRev||1))} of matcha`,
+      'Matcha sold under the Spirit Tea catalogue rather than a customer brand. This is the steadier of the two lines and the better read on underlying matcha demand.')}
+    ${tile('Matcha SKUs sold',fmtN(P.top.length),
+      `${d(P.top.length,Q&&Q.top.length,{what:'Distinct matcha SKUs in the previous period'})} distinct SKUs with revenue`,
+      'Number of distinct matcha SKUs that generated revenue in this range. Rising means the matcha range is broadening rather than a single big SKU carrying it.')}
   </div>
 
   <div class="grid g2">
     <div class="card">
       <h2>Matcha as a share of revenue</h2>
-      <p class="cap">Split by whether the matcha carries a customer's brand or Spirit Tea's.</p>
+      <p class="cap">Split by whether the matcha carries a customer's brand or Spirit Tea's.
+      ${qPct!=null?`Matcha was <b>${fmtPct(qPct)}</b> of revenue in ${esc(PV?PV.label:'the previous period')}.`:''}</p>
       ${stackbar([
         {k:'Private-label matcha',v:P.matchaPL,color:'var(--s1)'},
         {k:'Catalogue matcha',v:P.matchaCat,color:'var(--s4)'},
@@ -1323,6 +1382,12 @@ function renderProducts(C,P){
       <h2>Product tier mix ${I('Tier is read from the SKU, which encodes it as tier1 / tier2 / tier3. Tier reflects the quality and cost of the leaf Spirit Tea buys, not the size of the customer. Lines whose SKU carries no tier are excluded.')}</h2>
       <p class="cap">Revenue by leaf tier — the "finesse versus volume" view.</p>
       ${stackbar(tiers,tierTotal)}
+      ${Q?`<div class="grid g3" style="margin-top:14px;gap:9px">
+        ${['T1','T2','T3'].map(t=>`<div class="tile" style="padding:11px 12px">
+          <div class="lab" style="font-size:10px">${t} ${t==='T1'?'premium':t==='T2'?'mid':'entry'}</div>
+          <div style="margin-top:6px">${d(P.byTier.get(t)||0,Q.byTier.get(t)||0,{fmt:fmtUSD,what:t+' revenue in the previous period'})}</div>
+        </div>`).join('')}
+      </div>`:''}
       <div style="margin-top:20px">
         <h2 style="font-size:13px;margin-bottom:2px">Tier mix by rep ${I('The same three tiers, broken out for each rep, so it is visible who is selling premium leaf and who is moving volume. T1 share is that rep\'s premium revenue as a percentage of their own tiered revenue — the "finesse" number.')}</h2>
         <p class="cap" style="margin-bottom:11px">Who sells premium leaf and who moves volume.</p>
@@ -1335,7 +1400,7 @@ function renderProducts(C,P){
     <h2>Which matcha items drive revenue</h2>
     <p class="cap">Every matcha SKU with revenue in this range, largest first.</p>
     ${P.top.length?`<div class="tblwrap"><table>
-      <thead><tr><th>Product</th><th>SKU</th><th>Type</th><th>Tier</th><th class="num">Units</th><th class="num">Revenue</th><th class="num">% of matcha</th></tr></thead>
+      <thead><tr><th>Product</th><th>SKU</th><th>Type</th><th>Tier</th><th class="num">Units</th><th class="num">Revenue</th>${Q?'<th class="num">vs prev</th>':''}<th class="num">% of matcha</th></tr></thead>
       <tbody>${P.top.map(r=>`<tr>
         <td class="nm">${esc(r.name||'(unnamed)')}</td>
         <td class="dim" style="font-size:12px">${esc(r.sku||'—')}</td>
@@ -1343,6 +1408,7 @@ function renderProducts(C,P){
         <td class="dim">${r.tier||'—'}</td>
         <td class="num dim">${fmtN(r.units)}</td>
         <td class="num nm">${fmtUSD(r.rev)}</td>
+        ${Q?`<td class="num">${delta(r.rev,qSku.get(r.sku||r.name),{fmt:fmtUSD,what:esc(r.name||r.sku)+' in the previous period'})}</td>`:''}
         <td class="num">${fmtPct(pct(r.rev,P.matchaRev||1))}</td>
       </tr>`).join('')}</tbody></table></div>`:'<div class="empty">No matcha revenue in this range.</div>'}
   </div>`;
@@ -1359,7 +1425,8 @@ function renderDefs(C){
       <thead><tr><th style="width:210px">Metric</th><th>Definition</th></tr></thead>
       <tbody>
       <tr><td class="nm">Wholesale revenue</td><td>Every HubSpot Order above $0 in the range, dated by the Shopify order date. This is the complete B2B figure — it includes the large private-label draft orders that never pass through web checkout.</td></tr>
-      <tr><td class="nm">Change vs previous period</td><td>The small green and red badges beside most figures. The comparison window is always the <b>same number of days, ending the day before the selected range begins</b> — pick the last 30 days and it compares against the 30 days before that; pick 2026 to date and it compares against the equivalent stretch before it. It moves automatically whenever you change the dates, so there is nothing to configure. Hover any badge to see the earlier figure it is measured against. Three things worth knowing: the arrow always carries the direction, so the badges still read correctly in print or for colour-blind readers; a badge reading <b>no comparison</b> means the matching earlier window falls before January 2025, which is as far back as this dashboard reads; and figures measured from today rather than from inside the range — accounts at risk, slipping accounts, the Enterprise account count — carry no badge at all, because there is no honest way to compare them period to period.</td></tr>
+      <tr><td class="nm">Change vs previous period</td><td>The small green and red badges beside most figures. The comparison window is always the <b>same number of days, ending the day before the selected range begins</b> — pick the last 30 days and it compares against the 30 days before that; pick 2026 to date and it compares against the equivalent stretch before it. It moves automatically whenever you change the dates, so there is nothing to configure. Hover any badge to see the earlier figure it is measured against. The badges now run across every tab: revenue, leads and close rate on the Overview; the sales totals and each rep's revenue on Team; Enterprise revenue and every Enterprise account on Accounts; matcha, tiers and each matcha SKU on Products. Four things worth knowing: the arrow always carries the direction, so the badges still read correctly in print or for colour-blind readers; a badge reading <b>new</b> means there was nothing at all in the earlier period, so a percentage would be meaningless; a badge reading <b>no comparison</b> means the matching earlier window falls before January 2025, which is as far back as this dashboard reads; and figures measured from today rather than from inside the range — accounts at risk, slipping accounts, the Enterprise account count — carry no badge at all, because there is no honest way to compare them period to period.</td></tr>
+      <tr><td class="nm">Why Products is slower</td><td>Product and matcha figures are built from every individual line item on every order, which is by far the heaviest thing this dashboard asks HubSpot for. Adding the comparison period doubles it, so that tab loads its own numbers first and fills in the change badges a moment later — you will see <b>comparing…</b> in the meantime. If HubSpot rate-limits the second request, the tab keeps its own figures and simply shows no badges rather than failing. A shorter range brings them back.</td></tr>
       <tr><td class="nm">Net revenue retention</td><td>The single number that says whether Customer Success is doing its job. Take the accounts that were already in the book before this range began, and compare what they spent in the previous period with what they spent in this one. <b>Above 100% means the book grew on its own</b>, with no new customers at all. Below 100% means existing accounts are shrinking faster than others grow — something total revenue hides completely when sales keeps bringing new accounts in the front door. There is no minimum threshold anywhere in this calculation: every dollar counts, so a large account growing 2% contributes those dollars in full. Accounts created inside the range are left out, because they have no earlier period and counting them would turn new business into retention. On ranges shorter than 90 days the figure is shown with a warning, since wholesale accounts order on their own rhythm and a short window measures timing more than health.</td></tr>
       <tr><td class="nm">Expansion, contraction, lapsed</td><td>The three forces moving the book, split by direction alone. <b>Expansion</b> is every dollar of increase across accounts that spent more. <b>Contraction</b> is every dollar of decrease across accounts that still ordered but ordered less. <b>Lapsed</b> is the previous revenue of accounts that ordered before and placed nothing this range — which on a short window often means between orders rather than lost, so check it against the slipping and churned lists. The three never overlap, so they can be added.</td></tr>
       <tr><td class="nm">Biggest growth / decline</td><td>Movers in the Customer Success book, <b>ranked in dollars rather than percent</b>. This is deliberate: a 2% rise on a million-dollar account is worth more attention than a small account doubling, and a percentage ranking would bury it. The percentage is shown beside each row for context, but the order is set by the money.</td></tr>
@@ -1398,13 +1465,35 @@ function renderDefs(C){
 }
 
 /* ══════════════════════════ ORCHESTRATION ══════════════════════════ */
+/* Line items are the expensive read, so this tab loads on demand — and the comparison
+   period is loaded only after the current one has succeeded. If the comparison fails,
+   the tab still renders with its own numbers and simply shows no change badges: a
+   missing comparison is never allowed to take the whole tab down with it. */
+async function loadPrevProductsIfNeeded(C){
+  if(!CORE.prevRange || !CORE.prevOrders || !CORE.prevOrders.length) return null;
+  const ck=RANGE.key+'|'+iso(RANGE.from)+'|'+iso(RANGE.to);
+  if(CACHE[ck]&&CACHE[ck].productsPrev) return CACHE[ck].productsPrev;
+  try{
+    const pp=await loadProducts(CORE.prevOrders,'previous period');
+    CACHE[ck]=CACHE[ck]||{}; CACHE[ck].productsPrev=pp;
+    return pp;
+  }catch(e){ console.warn('comparison period for products could not load',e); return null; }
+}
 async function loadProductsIfNeeded(){
   const ck=RANGE.key+'|'+iso(RANGE.from)+'|'+iso(RANGE.to);
-  if(CACHE[ck]&&CACHE[ck].products){ PRODUCTS=CACHE[ck].products; renderProducts(window.__C,computeProducts(window.__C)); return; }
+  const paint=async()=>{
+    const C=window.__C;
+    const cur=computeProducts(C,PRODUCTS,CORE.orders,CORE.o2c);
+    renderProducts(C,cur,null,true);                       // numbers first, comparison after
+    PRODUCTS_PREV=await loadPrevProductsIfNeeded(C);
+    const prv=PRODUCTS_PREV?computeProducts(C,PRODUCTS_PREV,CORE.prevOrders,CORE.prevO2c):null;
+    renderProducts(C,cur,prv,false);
+  };
+  if(CACHE[ck]&&CACHE[ck].products){ PRODUCTS=CACHE[ck].products; await paint(); return; }
   try{
-    PRODUCTS=await loadProducts();
+    PRODUCTS=await loadProducts(CORE.orders,null);
     CACHE[ck]=CACHE[ck]||{}; CACHE[ck].products=PRODUCTS;
-    renderProducts(window.__C,computeProducts(window.__C));
+    await paint();
   }catch(e){
     $('#p-prod').innerHTML=`<div class="card">
       <h2>Product detail could not finish loading</h2>
