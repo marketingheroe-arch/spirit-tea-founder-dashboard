@@ -284,7 +284,7 @@ const SLIP_DAYS  = 90;       // 90–365 days           = slipping
 
 /* Period-over-period comparison — Shopify convention.
    "Previous period" for a calendar preset (this month / this quarter / YTD) is the SAME
-   number of days into the previous calendar period: 1 Jul–21 Sep is compared against
+   calendar position in the previous period: 1 Jul–21 Sep is compared against
    1 Apr–21 Jun, not against the 83 days that happen to precede 1 Jul. Rolling presets
    (last 30/90 days) and custom ranges compare against the window of the same length
    ending the day before the range starts. "Same period last year" shifts the range
@@ -483,7 +483,7 @@ function computeRange(key){
 }
 /** The comparison window for the selected range.
     mode 'year'  → the same dates one year earlier (every preset and custom range).
-    mode 'period', calendar presets (mtd / qtd / ytd) → the same number of days into the
+    mode 'period', calendar presets (mtd / qtd / ytd) → the same calendar position in the
       previous month / quarter / year, the way Shopify Analytics defines "previous period":
       QTD on 21 Sep = 1 Jul–21 Sep, compared against 1 Apr–21 Jun.
     mode 'period', rolling presets and custom → the mirror window of the same length
@@ -499,13 +499,17 @@ function prevRange(from,to,key,mode){
     pFrom=new Date(Date.UTC(from.getUTCFullYear()-1,from.getUTCMonth(),from.getUTCDate(),from.getUTCHours(),from.getUTCMinutes(),from.getUTCSeconds()));
     pTo  =new Date(Date.UTC(to.getUTCFullYear()-1,to.getUTCMonth(),to.getUTCDate(),to.getUTCHours(),to.getUTCMinutes(),to.getUTCSeconds()));
   }else if(key==='ytd'||key==='qtd'||key==='mtd'){
+    // Shopify aligns by calendar position, not by day count: on 21 Sep, QTD
+    // (1 Jul–21 Sep) is compared against 1 Apr–21 Jun — same day-of-month in the
+    // matching month of the previous period, clamped to that month's last day.
     const y=from.getUTCFullYear(), m=from.getUTCMonth();
-    if(key==='ytd')      pFrom=new Date(Date.UTC(y-1,0,1));
-    else if(key==='qtd') pFrom=new Date(Date.UTC(y,m-3,1));
-    else                 pFrom=new Date(Date.UTC(y,m-1,1));
-    // same number of days into the previous period, never past its own end
-    const periodEnd=new Date(from.getTime()-1);
-    pTo=new Date(Math.min(pFrom.getTime()+span, periodEnd.getTime()));
+    const shift = key==='ytd' ? 12 : key==='qtd' ? 3 : 1;   // months back
+    pFrom=new Date(Date.UTC(y,m-shift,1));
+    const tY=to.getUTCFullYear(), tM=to.getUTCMonth()-shift, tD=to.getUTCDate();
+    const lastDay=new Date(Date.UTC(tY,tM+1,0)).getUTCDate();
+    pTo=new Date(Date.UTC(tY,tM,Math.min(tD,lastDay),23,59,59,999));
+    // never past the end of the previous period (guards month-length edge cases)
+    pTo=new Date(Math.min(pTo.getTime(), from.getTime()-1));
   }else{
     pTo=new Date(from.getTime()-1);
     pFrom=new Date(pTo.getTime()-span);
@@ -519,8 +523,8 @@ function compareExplain(P){
   const k=RANGE.key;
   if(COMPARE==='year') return `the same dates one year earlier`;
   if(k==='ytd') return `the same stretch of last year`;
-  if(k==='qtd') return `the same number of days into the previous quarter — the way Shopify defines "previous period"`;
-  if(k==='mtd') return `the same number of days into the previous month — the way Shopify defines "previous period"`;
+  if(k==='qtd') return `the same point in the previous quarter — the way Shopify defines "previous period"`;
+  if(k==='mtd') return `the same point in the previous month — the way Shopify defines "previous period"`;
   return `the same number of days, ending the day before this range starts`;
 }
 /** True when the selected range stops part-way through its final month, which makes
@@ -1468,7 +1472,7 @@ function renderDefs(C){
       <thead><tr><th style="width:210px">Metric</th><th>Definition</th></tr></thead>
       <tbody>
       <tr><td class="nm">Wholesale revenue</td><td>Every HubSpot Order above $0 in the range, dated by the Shopify order date. This is the complete B2B figure — it includes the large private-label draft orders that never pass through web checkout.</td></tr>
-      <tr><td class="nm">Change vs previous period</td><td>The small green and red badges beside most figures. The comparison follows the Shopify Analytics convention. For the calendar presets — <b>this month, this quarter, 2026 YTD</b> — "previous period" is the <b>same number of days into the previous month, quarter or year</b>: on 21 September, "this quarter" (1 Jul–21 Sep) is compared against 1 Apr–21 Jun, exactly as Shopify shows it. For <b>last 30 / 90 days</b> and custom ranges, it is the window of the same length ending the day before the range starts. The <b>Compare to</b> selector next to the dates switches every badge to the <b>same period last year</b> instead, which is the better read for a seasonal product. It moves automatically whenever you change the dates. Hover any badge to see the earlier figure it is measured against. The badges now run across every tab: revenue, leads and close rate on the Overview; the sales totals and each rep's revenue on Team; Enterprise revenue and every Enterprise account on Accounts; matcha, tiers and each matcha SKU on Products. Four things worth knowing: the arrow always carries the direction, so the badges still read correctly in print or for colour-blind readers; a badge reading <b>new</b> means there was nothing at all in the earlier period, so a percentage would be meaningless; a badge reading <b>no comparison</b> means the matching earlier window falls before January 2025, which is as far back as this dashboard reads; and figures measured from today rather than from inside the range — accounts at risk, slipping accounts, the Enterprise account count — carry no badge at all, because there is no honest way to compare them period to period.</td></tr>
+      <tr><td class="nm">Change vs previous period</td><td>The small green and red badges beside most figures. The comparison follows the Shopify Analytics convention. For the calendar presets — <b>this month, this quarter, 2026 YTD</b> — "previous period" is the <b>same point in the previous month, quarter or year</b>: on 21 September, "this quarter" (1 Jul–21 Sep) is compared against 1 Apr–21 Jun, exactly as Shopify Analytics shows it. For <b>last 30 / 90 days</b> and custom ranges, it is the window of the same length ending the day before the range starts. The <b>Compare to</b> selector next to the dates switches every badge to the <b>same period last year</b> instead, which is the better read for a seasonal product. It moves automatically whenever you change the dates. Hover any badge to see the earlier figure it is measured against. The badges now run across every tab: revenue, leads and close rate on the Overview; the sales totals and each rep's revenue on Team; Enterprise revenue and every Enterprise account on Accounts; matcha, tiers and each matcha SKU on Products. Four things worth knowing: the arrow always carries the direction, so the badges still read correctly in print or for colour-blind readers; a badge reading <b>new</b> means there was nothing at all in the earlier period, so a percentage would be meaningless; a badge reading <b>no comparison</b> means the matching earlier window falls before January 2025, which is as far back as this dashboard reads; and figures measured from today rather than from inside the range — accounts at risk, slipping accounts, the Enterprise account count — carry no badge at all, because there is no honest way to compare them period to period.</td></tr>
       <tr><td class="nm">Why Products is slower</td><td>Product and matcha figures are built from every individual line item on every order, which is by far the heaviest thing this dashboard asks HubSpot for. Adding the comparison period doubles it, so that tab loads its own numbers first and fills in the change badges a moment later — you will see <b>comparing…</b> in the meantime. If HubSpot rate-limits the second request, the tab keeps its own figures and simply shows no badges rather than failing. A shorter range brings them back.</td></tr>
       <tr><td class="nm">Net revenue retention</td><td>The single number that says whether Customer Success is doing its job. Take the accounts that were already in the book before this range began, and compare what they spent in the previous period with what they spent in this one. <b>Above 100% means the book grew on its own</b>, with no new customers at all. Below 100% means existing accounts are shrinking faster than others grow — something total revenue hides completely when sales keeps bringing new accounts in the front door. There is no minimum threshold anywhere in this calculation: every dollar counts, so a large account growing 2% contributes those dollars in full. Accounts created inside the range are left out, because they have no earlier period and counting them would turn new business into retention. On ranges shorter than 90 days the figure is shown with a warning, since wholesale accounts order on their own rhythm and a short window measures timing more than health.</td></tr>
       <tr><td class="nm">Expansion, contraction, lapsed</td><td>The three forces moving the book, split by direction alone. <b>Expansion</b> is every dollar of increase across accounts that spent more. <b>Contraction</b> is every dollar of decrease across accounts that still ordered but ordered less. <b>Lapsed</b> is the previous revenue of accounts that ordered before and placed nothing this range — which on a short window often means between orders rather than lost, so check it against the slipping and churned lists. The three never overlap, so they can be added.</td></tr>
