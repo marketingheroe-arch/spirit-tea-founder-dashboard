@@ -271,8 +271,9 @@ footer{max-width:1320px;margin:0 auto;padding:0 26px 40px;color:var(--ink-muted)
 "use strict";
 /* ══════════════════════════ CONFIG ══════════════════════════ */
 const PROXY      = 'https://super-limit-2f74.marketing-heroe.workers.dev';
-const PROXY_KEY  = 'spirit2253';            // Worker auth — separate from the UI password
-const PASSWORD   = 'Stjordan26?!';
+// Access key is NOT stored in this file. The user types it at sign-in and the
+// Cloudflare Worker validates it server-side (env.DASHBOARD_PASSWORD).
+let PROXY_KEY    = '';
 const ALLOWED    = ['jordan@spirittea.co','marketing.heroe@gmail.com'];
 const PORTAL     = '22533061';
 const HS_CO      = `https://app.hubspot.com/contacts/${PORTAL}/record/0-2/`;
@@ -416,6 +417,11 @@ async function hsPost(path,body,attempt=0){
   }catch(netErr){
     if(attempt<4){ await sleep(500*Math.pow(2,attempt)); return hsPost(path,body,attempt+1); }
     throw new Error(`${path} → network error`);
+  }
+  if(r.status===401){
+    try{sessionStorage.removeItem('st_founder');sessionStorage.removeItem('st_fkey')}catch(e){}
+    $('#auth').hidden=false;
+    throw new Error('Access key rejected — please sign in again.');
   }
   if((r.status===429 || r.status>=500) && attempt<6){
     const ra=parseFloat(r.headers.get('Retry-After')||'0');
@@ -1605,16 +1611,27 @@ $$('.tab').forEach(t=>t.addEventListener('click',()=>{
 }));
 $('#refresh').addEventListener('click',()=>{ for(const k in CACHE)delete CACHE[k]; run(); });
 $('#out').addEventListener('click',()=>{
-  try{sessionStorage.removeItem('st_founder')}catch(e){}
+  try{sessionStorage.removeItem('st_founder');sessionStorage.removeItem('st_fkey')}catch(e){}
   location.reload();
 });
 
-function auth(){
+async function checkKey(key){
+  try{
+    const r=await fetch(`${PROXY}?path=${encodeURIComponent('/crm/v3/owners/?limit=1')}`,{headers:{'x-dashboard-key':key}});
+    return r.status!==401;
+  }catch(e){ return false; }
+}
+async function auth(){
   const em=($('#em').value||'').trim().toLowerCase(), pw=$('#pw').value||'';
-  const err=$('#aerr');
+  const err=$('#aerr'); err.hidden=true;
   if(!ALLOWED.includes(em)){ err.hidden=false; err.textContent='That email is not on the access list for this dashboard.'; return; }
-  if(pw!==PASSWORD){ err.hidden=false; err.textContent='Incorrect password.'; return; }
-  try{sessionStorage.setItem('st_founder',em)}catch(e){}
+  if(!pw){ err.hidden=false; err.textContent='Please enter your password.'; return; }
+  $('#go').disabled=true;
+  const ok=await checkKey(pw);
+  $('#go').disabled=false;
+  if(!ok){ err.hidden=false; err.textContent='Incorrect password.'; return; }
+  PROXY_KEY=pw;
+  try{sessionStorage.setItem('st_founder',em);sessionStorage.setItem('st_fkey',pw)}catch(e){}
   $('#auth').hidden=true;
   setRange('ytd');
 }
@@ -1625,8 +1642,8 @@ $('#go').addEventListener('click',auth);
 (function(){
   const d2=new Date(), d1=new Date(Date.UTC(2026,0,1));
   $('#d1').value=iso(d1); $('#d2').value=iso(d2);
-  let who=null; try{who=sessionStorage.getItem('st_founder')}catch(e){}
-  if(who&&ALLOWED.includes(who)){ $('#auth').hidden=true; setRange('ytd'); }
+  let who=null,key=null; try{who=sessionStorage.getItem('st_founder');key=sessionStorage.getItem('st_fkey')}catch(e){}
+  if(who&&key&&ALLOWED.includes(who)){ PROXY_KEY=key; $('#auth').hidden=true; setRange('ytd'); }
 })();
 </script>
 </body>
