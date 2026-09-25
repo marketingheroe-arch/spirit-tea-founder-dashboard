@@ -566,7 +566,7 @@ async function loadCore(){
   const companies=await searchAll('companies',{
     filterGroups:[{filters:[{propertyName:'createdate',operator:'HAS_PROPERTY'}]}],
     properties:['name','domain','hubspot_owner_id','segment','enterprise_type','lifecyclestage','createdate',
-      'average_order_value_rollup','last_order_date_rollup','first_order_date','hs_analytics_source_data_1',
+      'average_order_value_rollup','last_order_date_rollup','first_order_date_rollup','hs_analytics_source_data_1',
       'hs_object_source_label','num_associated_contacts','num_associated_deals','cs_company_owner','country'],
     sorts:[{propertyName:'createdate',direction:'DESCENDING'}]},6000);
   prog(`${fmtN(companies.length)} accounts. Loading deals…`,1);
@@ -688,7 +688,7 @@ function computeCore(){
       created:p.createdate?Date.parse(p.createdate):null,
       aov:parseFloat(p.average_order_value_rollup)||0,
       lastOrder:p.last_order_date_rollup?Date.parse(p.last_order_date_rollup):null,
-      firstOrder:p.first_order_date?Date.parse(p.first_order_date):null,
+      firstOrder:p.first_order_date_rollup?Date.parse(p.first_order_date_rollup):null,
       src:(p.hs_analytics_source_data_1||'').toLowerCase(),
       recSrc:p.hs_object_source_label||'',
       contacts:parseInt(p.num_associated_contacts)||0,
